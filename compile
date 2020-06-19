@@ -1,0 +1,2 @@
+#!/bin/bash
+gcc -g -o example example.c mcmc.c
