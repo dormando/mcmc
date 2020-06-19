@@ -18,7 +18,7 @@ malloc a small structure and some buffers, but you are then free to manage
 them yourselves. Clients do not hold onto buffers when idle, cutting their
 memory overhead to a handful of bytes plus the TCP socket.
 
-MCMC is designed to be a building block for clients designing full clients.
+MCMC is designed to be a building block for users designing full clients.
 For example:
 
 * A client author wants to implement the "get" command
@@ -42,8 +42,11 @@ Caveats:
 * It does not support the various maintenance/settings commands (ie; `lru_crawler`).
   It may gain some generic support for this, but those commands were not
 designed with consistent response codes and are hard to implement.
+* Does not support the binary protocol, which has been deprecated as of 1.6.0.
 
 As of this writing the code is being released _early_ (perhaps too early?). It
 may not have proper makefiles, tests, or a fully implemented API. The code has
 been posted so client authors and users can give early feedback on the API in
 hopes of prodiving something high quality and stable.
+
+Again, looking for feedback! Open an issue or let me know what you think.
