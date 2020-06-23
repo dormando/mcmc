@@ -9,7 +9,8 @@
 // TODO: try writing a "simple_get()", set(), and meta() commands.
 
 int main (int argc, char *agv[]) {
-
+    // TODO: detect if C is pre-C11?
+    printf("C version: %ld\n", __STDC_VERSION__);
     void *c = malloc(mcmc_size(MCMC_OPTION_BLANK));
     // we only "need" the minimum buf size.
     // buffers large enough to fit return values result in fewer syscalls.
@@ -42,60 +43,48 @@ int main (int argc, char *agv[]) {
     }
 
     // buffer shouldn't change until the read is completed.
-    status = mcmc_read(c, rbuf, bufsize);
+    mcmc_resp_t resp;
+    status = mcmc_read(c, rbuf, bufsize, &resp);
     if (status == MCMC_OK) {
+        // OK means a response of some kind was read.
         char *val;
-        // should be a few options:
-        // 1) always grab the value into memory here.
-        // 2) stream the value by reading it in chunks.
-        // (reset read to do this)
-        // 3) call mcmc_is_value_ready(c) and grab it without copying.
-        size_t vsize = 0;
-        int ready = 0; // whole value has been read already.
-        if (mcmc_has_value(c, &vsize, &ready) == MCMC_OK) {
-            if (ready) {
-                val = mcmc_value(c);
+        // NOTE: is "it's not a miss, and vlen is 0" enough to indicate that
+        // a 0 byte value was returned?
+        if (resp.vlen != 0) {
+            if (resp.vlen == resp.vlen_read) {
+                val = resp.value;
             } else {
-                // NOTE: with this approach we can't avoid memcpy'ing part of
-                // the value.
-                val = malloc(vsize);
+                val = malloc(resp.vlen);
                 int read = 0;
                 do {
-                    status = mcmc_read_value(c, val, vsize, &read);
+                    status = mcmc_read_value(c, val, resp.vlen, &read);
                 } while (status == MCMC_WANT_READ);
             }
+            if (resp.vlen > 0) {
+                val[resp.vlen-1] = '\0';
+                printf("Response value: %s\n", val);
+            }
         }
-
-        switch (mcmc_resp_type(c)) {
-            case MCMC_RESP_GET:
-                // use mcmc_resp_get(c, etc);
+        switch (resp.type) {
+            case MCMC_RESP_FAIL:
+                // resp.fail_code
                 break;
-            case MCMC_RESP_META:
-                // use mcmc_resp_meta(c, rline, &rlen);
+            case MCMC_RESP_GET:
+                break;
+            case MCMC_RESP_MISS: // ascii or meta miss.
+                break;
+            case MCMC_RESP_META: // any meta command. they all return the same.
                 break;
             case MCMC_RESP_STAT:
-                // use mcmc_resp_stat(c, rline, &rlen) while res ==
-                // MCMC_CONTINUE
+                // STAT responses. need to call mcmc_read() in loop until
+                // we get an end signal.
                 break;
             default:
-                fprintf(stderr, "Unknown response type: %d\n", mcmc_resp_type(c));
+                // TODO: type -> str func.
+                fprintf(stderr, "unknown response type: %d\n", resp.type);
                 break;
         }
-
-        // we now have a valid value and result line.
-        // copy them if necessary, as they point into the buffer supplied.
-        
-        // options here:
-        // 1) minimal copying: we have rline, val (from whatever source) in
-        // the buffer. there may be bits left in the buffer.
-        // 2) copy off rline/val and keep the buffer.
-    } else if (status == MCMC_MISS) {
-        // miss.
-    } else if (status == MCMC_FAIL) {
-        int code = mcmc_fail_code(c);
-        // MCMC_FAIL_NOT_STORED, MCMC_FAIL_NOT_FOUND, MCMC_FAIL_EXISTS, etc.
-        // TODO: code_str() ?
-    } else if (status == MCMC_ERR) {
+    } else {
         // some kind of command specific error code (management commands)
         // or protocol error status.
         char code[MCMC_ERROR_CODE_MAX];
@@ -124,7 +113,7 @@ int main (int argc, char *agv[]) {
         memmove(rbuf, newbuf, remain);
     }
 
-    status == mcmc_disconnect(c);
+    status = mcmc_disconnect(c);
     // The only free'ing needed.
     free(c);
 

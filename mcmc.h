@@ -30,7 +30,9 @@
 #define MCMC_RESP_META 101
 // TODO: RESP_NUMERIC for incr/decr response? or copy as value?
 #define MCMC_RESP_STAT 102
-#define MCMC_RESP_GENERIC 103
+#define MCMC_RESP_FAIL 103
+#define MCMC_RESP_GENERIC 104
+#define MCMC_RESP_MISS 105
 
 #define MCMC_OPTION_BLANK 0
 
@@ -39,20 +41,42 @@
 #define MCMC_ERROR_CODE_MAX 32
 #define MCMC_ERROR_MSG_MAX 512
 
+typedef struct {
+    unsigned short type;
+    unsigned short fail_code;
+    char *value;
+    size_t vlen;
+    size_t vlen_read;
+    union {
+        // META response
+        struct {
+            char *rline;
+            size_t rlen;
+        };
+        // GET response
+        struct {
+            char *key;
+            size_t klen;
+            uint32_t flags;
+            uint64_t cas;
+            // TODO: value info
+        };
+        // STAT response
+        struct {
+            char *stat;
+            size_t slen;
+        };
+    };
+} mcmc_resp_t;
+
 size_t mcmc_size(int options);
 size_t mcmc_min_buffer_size(int options);
 int mcmc_connect(void *c, char *host, char *port, int options);
 int mcmc_send_request(void *c, char *request, int len, int count);
-int mcmc_read(void *c, char *buf, size_t bufsize);
-char *mcmc_value(void *c);
-int mcmc_has_value(void *c, size_t *vsize, int *ready);
+int mcmc_read(void *c, char *buf, size_t bufsize, mcmc_resp_t *r);
 int mcmc_read_value(void *c, char *val, const size_t vsize, int *read);
 char *mcmc_buffer_consume(void *c, int *remain);
 int mcmc_disconnect(void *c);
 void mcmc_get_error(void *c, char *code, size_t clen, char *msg, size_t mlen);
-int mcmc_fail_code(void *c);
-int mcmc_resp_type(void *c);
-int mcmc_resp_get(void *c, char **key, size_t *keylen, uint32_t *flags, uint64_t *cas);
-int mcmc_resp_meta(void *c, char *rflags, size_t *rlen);
 
 #endif

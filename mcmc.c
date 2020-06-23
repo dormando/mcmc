@@ -20,9 +20,13 @@
 
 #define FLAG_BUF_IS_ERROR 0x1
 #define FLAG_BUF_IS_NUMERIC 0x2
-#define FLAG_BUF_HAS_VALUE 0x4
-#define FLAG_GET_ASCII_MODE 0x8
 
+#define STATE_DEFAULT 0 // looking for any kind of response
+#define STATE_GET_RESP 1 // processing VALUE's until END
+#define STATE_STAT_RESP 2 // processing STAT's until END
+#define STATE_STAT_RESP_DONE 3
+
+// TODO: add state machine state. fixes VALUE issue, some other stuff.
 typedef struct mcmc_ctx {
     int fd;
     int gai_status; // getaddrinfo() last status.
@@ -33,23 +37,16 @@ typedef struct mcmc_ctx {
     int error; // latest error code.
     int response_type; // type of response value for user to handle.
     uint32_t status_flags; // internal only flags.
+    int state;
 
     size_t buffer_used; // amount of bytes read into the buffer so far.
     char *buffer_head; // buffer pointer currently in use.
     char *buffer_request_end; // cached endpoint for current request
 
     // request response detail.
-    char *resp_line;
-    char *key;
-    int resp_len;
+    mcmc_resp_t *resp;
     int value_offset; // how far into buffer_head the value appears.
     int value_buf_remain; // how much potential value remains inside main buf.
-    int key_len;
-    uint32_t vsize;
-    uint32_t value_toread;
-    // specific for ASCII get response.
-    uint32_t client_flags;
-    uint64_t cas;
 } mcmc_ctx_t;
 
 // INTERNAL FUNCTIONS
@@ -88,7 +85,7 @@ static int _mcmc_parse_value_line(mcmc_ctx_t *ctx) {
 
     // If next byte is a space, we read the optional CAS value.
     uint64_t cas = 0;
-    if (*n = ' ') {
+    if (*n == ' ') {
         errno = 0;
         cas = strtoull(p, &n, 10);
         if ((errno == ERANGE) || (p == n)) {
@@ -98,13 +95,20 @@ static int _mcmc_parse_value_line(mcmc_ctx_t *ctx) {
 
     // If we made it this far, we've parsed everything, stuff the details into
     // the context for fetching later.
-    ctx->key = key;
-    ctx->key_len = keylen;
-    ctx->vsize = bytes + 2; // add in the \r\n
-    ctx->client_flags = flags;
-    ctx->cas = cas;
-    ctx->status_flags |= FLAG_BUF_HAS_VALUE;
-    ctx->status_flags |= FLAG_GET_ASCII_MODE;
+    mcmc_resp_t *r = ctx->resp;
+    r->value = buf + ctx->value_offset;
+    r->vlen = bytes + 2; // add in the \r\n
+    if (ctx->value_buf_remain >= r->vlen) {
+        r->vlen_read = r->vlen;
+    } else {
+        r->vlen_read = ctx->value_buf_remain;
+    }
+    r->key = key;
+    r->klen = keylen;
+    r->flags = flags;
+    r->cas = cas;
+    r->type = MCMC_RESP_GET;
+    ctx->state = STATE_GET_RESP;
 
     // NOTE: if value_offset < buffer_used, has part of the value in the
     // buffer already.
@@ -112,39 +116,6 @@ static int _mcmc_parse_value_line(mcmc_ctx_t *ctx) {
     return MCMC_OK;
 }
 
-// Possible response lines:
-// - two-char meta code
-//   - ME
-//   - EN
-//   - VA
-//   - NS | EX | NF
-//   - MN
-// - OK (meta)
-// - OK (no arguments, non-meta)
-// - ERROR
-// - ERROR [message]
-// - CLIENT_ERROR [message]
-// - SERVER_ERROR [message]
-// - VALUE
-// - END
-// - DELETED
-// - NOT_FOUND
-// - STORED
-// - EXISTS
-// - NOT_STORED
-// - number\r\n
-// - TOUCHED
-// slab command: (ugh, sorry)
-// - BUSY
-// - BADCLASS
-// - NOSPARE
-// - NOTFULL
-// - UNSAFE
-// - SAME
-// stats:
-// - STAT <name> <value>\r\n
-// - VERSION version\r\n
-//
 // FIXME: This is broken for ASCII multiget.
 // if we get VALUE back, we need to stay in ASCII GET read mode until an END
 // is seen.
@@ -152,7 +123,6 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
     char *buf = ctx->buffer_head;
     char *cur = buf;
     char *en = ctx->buffer_request_end;
-    int len = en - buf;
     int rlen; // response code length.
     int more = 0;
 
@@ -182,6 +152,7 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
 
     int rv = -1;
     int fail = -1;
+    mcmc_resp_t *r = ctx->resp;
     switch (rlen) {
         case 2:
             // meta, "OK"
@@ -234,7 +205,13 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
                         if ((errno == ERANGE) || (cur == n)) {
                             rv = MCMC_ERR;
                         } else {
-                            ctx->vsize = vsize + 2; // tag in the \r\n.
+                            r->value = ctx->buffer_head+ctx->value_offset;
+                            r->vlen = vsize + 2; // tag in the \r\n.
+                            if (ctx->value_buf_remain >= r->vlen) {
+                                r->vlen_read = r->vlen;
+                            } else {
+                                r->vlen_read = ctx->value_buf_remain;
+                            }
                             cur = n;
                             if (*cur != ' ') {
                                 more = 0;
@@ -250,22 +227,33 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
             // maybe: if !rv and !fail, do something special?
             // if (more), they're flags. shove them in the right place.
             if (more) {
-                ctx->resp_line = cur+1; // eat the space.
-                ctx->resp_len = en - cur;
+                r->rline = cur+1; // eat the space.
+                r->rlen = en - cur;
             } else {
-                ctx->resp_line = NULL;
-                ctx->resp_len = 0;
+                r->rline = NULL;
+                r->rlen = 0;
             }
             break;
         case 3:
             if (memcmp(buf, "END", 3) == 0) {
-                rv = MCMC_MISS;
+                if (ctx->state == STATE_STAT_RESP) {
+                    // seen some STAT responses, now this completes it.
+                    ctx->state = STATE_STAT_RESP_DONE;
+                } else if (ctx->state == STATE_GET_RESP) {
+                    // seen at least one VALUE line, so this can't "miss"
+                    // TODO: need to quietly push the buffer?
+                    ctx->state = STATE_DEFAULT;
+                } else {
+                    // END alone means one or more ASCII GET's but no VALUE's.
+                    rv = MCMC_MISS;
+                }
             }
             break;
         case 4:
             if (memcmp(buf, "STAT", 4) == 0) {
                 rv = MCMC_OK;
                 ctx->response_type = MCMC_RESP_STAT;
+                ctx->state = STATE_STAT_RESP;
                 // TODO: initialize stat reader mode.
             }
             break;
@@ -423,7 +411,7 @@ int mcmc_send_request(void *c, char *request, int len, int count) {
     return MCMC_OK;
 }
 
-int mcmc_read(void *c, char *buf, size_t bufsize) {
+int mcmc_read(void *c, char *buf, size_t bufsize, mcmc_resp_t *r) {
     mcmc_ctx_t *ctx = (mcmc_ctx_t *)c;
 
     // adjust buffer by how far we've already consumed.
@@ -467,60 +455,13 @@ int mcmc_read(void *c, char *buf, size_t bufsize) {
 
     // We have a result line. Now pass it through the parser.
     // Then we indicate to the user that a response is ready.
+    ctx->resp = r;
     return _mcmc_parse_response(ctx);
-}
-
-int mcmc_resp_type(void *c) {
-    mcmc_ctx_t *ctx = (mcmc_ctx_t *)c;
-    return ctx->response_type;
-}
-
-int mcmc_fail_code(void *c) {
-    mcmc_ctx_t *ctx = (mcmc_ctx_t *)c;
-    return ctx->fail_code;
 }
 
 void mcmc_get_error(void *c, char *code, size_t clen, char *msg, size_t mlen) {
     code[0] = '\0';
     msg[0] = '\0';
-}
-
-// returns length of value plus the "\r\n" at the end.
-int mcmc_has_value(void *c, size_t *vsize, int *ready) {
-    mcmc_ctx_t *ctx = (mcmc_ctx_t *)c;
-
-    if ((ctx->status_flags & FLAG_BUF_HAS_VALUE) == 0) {
-        return MCMC_ERR;
-    }
-
-    if (vsize != NULL) {
-        *vsize = ctx->vsize;
-    }
-    if (ready != NULL) {
-        if (ctx->buffer_used >= ctx->value_offset + ctx->vsize) {
-            // validate \r\n
-            char *vend = ctx->buffer_head + ctx->value_offset + ctx->vsize;
-            if (vend[0] != '\r' || vend[1] != '\n') {
-                *ready = 0;
-                return MCMC_ERR;
-            }
-            *ready = 1;
-        } else {
-            *ready = 0;
-        }
-    }
-
-    return MCMC_OK;
-}
-
-// FIXME: value_from_buffer ?
-char *mcmc_value(void *c) {
-    mcmc_ctx_t *ctx = (mcmc_ctx_t *)c;
-    if ((ctx->status_flags & FLAG_BUF_HAS_VALUE) == 0) {
-        return NULL;
-    }
-
-    return ctx->buffer_head + ctx->value_offset;
 }
 
 // read into the buffer, up to a max size of vsize.
@@ -565,36 +506,6 @@ int mcmc_read_value(void *c, char *val, const size_t vsize, int *read) {
     }
 }
 
-int mcmc_resp_meta(void *c, char *rflags, size_t *rlen) {
-    mcmc_ctx_t *ctx = (mcmc_ctx_t *)c;
-
-    return -2;
-}
-
-// TODO: can kill all/most of the branches if we give the user a struct to
-// pass in?
-int mcmc_resp_get(void *c, char **key, size_t *keylen, uint32_t *flags, uint64_t *cas) {
-    mcmc_ctx_t *ctx = (mcmc_ctx_t *)c;
-    if (ctx->response_type != MCMC_RESP_GET) {
-        return MCMC_ERR;
-    }
-
-    if (key != NULL) {
-        *key = ctx->key;
-    }
-    if (keylen != NULL) {
-        *keylen = ctx->key_len;
-    }
-    if (flags != NULL) {
-        *flags = ctx->client_flags;
-    }
-    if (cas != NULL) {
-        *cas = ctx->cas;
-    }
-
-    return MCMC_OK;
-}
-
 char *mcmc_buffer_consume(void *c, int *remain) {
     mcmc_ctx_t *ctx = (mcmc_ctx_t *)c;
     int used = ctx->buffer_used;
@@ -608,7 +519,8 @@ char *mcmc_buffer_consume(void *c, int *remain) {
     ctx->response_type = 0;
 
     // If there was a value, advance over everything.
-    if (ctx->status_flags & FLAG_BUF_HAS_VALUE) {
+    // FIXME: need better internal indicator for how far to jump forward?
+    /*if (ctx->status_flags & FLAG_BUF_HAS_VALUE) {
         if (used >= ctx->vsize) {
             used -= ctx->vsize;
             buf += ctx->vsize;
@@ -616,7 +528,7 @@ char *mcmc_buffer_consume(void *c, int *remain) {
             buf += used;
             used = 0;
         }
-    }
+    }*/
     // FIXME: need to stay in value read mode.
     ctx->status_flags = 0;
 
