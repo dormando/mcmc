@@ -9,6 +9,9 @@
 
 #include "mcmc.h"
 
+// TODO: if there's a parse error or unknown status code, we likely have a
+// protocol desync and need to disconnect.
+
 // NOTE: this _will_ change a bit for adding TLS support.
 
 // A "reasonable" minimum buffer size to work with.
@@ -26,7 +29,6 @@
 #define STATE_STAT_RESP 2 // processing STAT's until END
 #define STATE_STAT_RESP_DONE 3
 
-// TODO: add state machine state. fixes VALUE issue, some other stuff.
 typedef struct mcmc_ctx {
     int fd;
     int gai_status; // getaddrinfo() last status.
@@ -39,14 +41,14 @@ typedef struct mcmc_ctx {
     uint32_t status_flags; // internal only flags.
     int state;
 
+    // FIXME: s/buffer_used/buffer_filled/ ?
     size_t buffer_used; // amount of bytes read into the buffer so far.
+    size_t buffer_request_len; // cached endpoint for current request
     char *buffer_head; // buffer pointer currently in use.
-    char *buffer_request_end; // cached endpoint for current request
+    char *buffer_tail; // consumed tail of the buffer.
 
     // request response detail.
     mcmc_resp_t *resp;
-    int value_offset; // how far into buffer_head the value appears.
-    int value_buf_remain; // how much potential value remains inside main buf.
 } mcmc_ctx_t;
 
 // INTERNAL FUNCTIONS
@@ -55,12 +57,12 @@ static int _mcmc_parse_value_line(mcmc_ctx_t *ctx) {
     char *buf = ctx->buffer_head;
     // we know that "VALUE " has matched, so skip that.
     char *p = buf+6;
-    char *en = ctx->buffer_request_end;
+    size_t l = ctx->buffer_request_len;
 
     // <key> <flags> <bytes> [<cas unique>]
     char *key = p;
     int keylen;
-    p = memchr(p, ' ', en - p);
+    p = memchr(p, ' ', l - 6);
     if (p == NULL) {
         return MCMC_PARSE_ERROR;
     }
@@ -68,6 +70,8 @@ static int _mcmc_parse_value_line(mcmc_ctx_t *ctx) {
     keylen = p - key;
 
     // convert flags into something useful.
+    // FIXME: do we need to prevent overruns in strtoul?
+    // we know for sure the line will eventually end in a \n.
     char *n = NULL;
     errno = 0;
     uint32_t flags = strtoul(p, &n, 10);
@@ -96,12 +100,15 @@ static int _mcmc_parse_value_line(mcmc_ctx_t *ctx) {
     // If we made it this far, we've parsed everything, stuff the details into
     // the context for fetching later.
     mcmc_resp_t *r = ctx->resp;
-    r->value = buf + ctx->value_offset;
+    // FIXME: set to NULL if we don't have the value?
+    r->value = ctx->buffer_tail;
     r->vlen = bytes + 2; // add in the \r\n
-    if (ctx->value_buf_remain >= r->vlen) {
+    int buffer_remain = ctx->buffer_used - (ctx->buffer_tail - ctx->buffer_head);
+    if (buffer_remain >= r->vlen) {
         r->vlen_read = r->vlen;
+        ctx->buffer_tail += r->vlen;
     } else {
-        r->vlen_read = ctx->value_buf_remain;
+        r->vlen_read = buffer_remain;
     }
     r->key = key;
     r->klen = keylen;
@@ -122,11 +129,11 @@ static int _mcmc_parse_value_line(mcmc_ctx_t *ctx) {
 static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
     char *buf = ctx->buffer_head;
     char *cur = buf;
-    char *en = ctx->buffer_request_end;
+    size_t l = ctx->buffer_request_len;
     int rlen; // response code length.
     int more = 0;
 
-    while (cur != en) {
+    while (l--) {
         if (*cur == ' ') {
             more = 1;
             break;
@@ -191,7 +198,7 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
                 if (buf[1] == 'K') {
                     // FIXME: think I really screwed myself changing
                     // everything to OK instead of HD.
-                    // bare OK could mean RESP_META or RESP_GENERIC :/
+                    // bare OK could mean RESP_META or RESP_GENERIC :(
                     rv = MCMC_OK;
                 }
                 break;
@@ -205,12 +212,15 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
                         if ((errno == ERANGE) || (cur == n)) {
                             rv = MCMC_ERR;
                         } else {
-                            r->value = ctx->buffer_head+ctx->value_offset;
+                            r->value = ctx->buffer_tail;
                             r->vlen = vsize + 2; // tag in the \r\n.
-                            if (ctx->value_buf_remain >= r->vlen) {
+                            // FIXME: macro.
+                            int buffer_remain = ctx->buffer_used - (ctx->buffer_tail - ctx->buffer_head);
+                            if (buffer_remain >= r->vlen) {
                                 r->vlen_read = r->vlen;
+                                ctx->buffer_tail += r->vlen;
                             } else {
-                                r->vlen_read = ctx->value_buf_remain;
+                                r->vlen_read = buffer_remain;
                             }
                             cur = n;
                             if (*cur != ' ') {
@@ -225,10 +235,10 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
                 break;
             }
             // maybe: if !rv and !fail, do something special?
-            // if (more), they're flags. shove them in the right place.
+            // if (more), there are flags. shove them in the right place.
             if (more) {
                 r->rline = cur+1; // eat the space.
-                r->rlen = en - cur;
+                r->rlen = l;
             } else {
                 r->rline = NULL;
                 r->rlen = 0;
@@ -243,6 +253,7 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
                     // seen at least one VALUE line, so this can't "miss"
                     // TODO: need to quietly push the buffer?
                     ctx->state = STATE_DEFAULT;
+                    rv = MCMC_OK;
                 } else {
                     // END alone means one or more ASCII GET's but no VALUE's.
                     rv = MCMC_MISS;
@@ -411,8 +422,10 @@ int mcmc_send_request(void *c, char *request, int len, int count) {
     return MCMC_OK;
 }
 
+// TODO: avoid recv if we have bytes in the buffer.
 int mcmc_read(void *c, char *buf, size_t bufsize, mcmc_resp_t *r) {
     mcmc_ctx_t *ctx = (mcmc_ctx_t *)c;
+    memset(r, 0, sizeof(*r));
 
     // adjust buffer by how far we've already consumed.
     char *b = buf + ctx->buffer_used;
@@ -431,24 +444,19 @@ int mcmc_read(void *c, char *buf, size_t bufsize, mcmc_resp_t *r) {
     // Always scan from the start of the original buffer.
     char *el = memchr(buf, '\n', ctx->buffer_used);
     if (!el) {
+        // FIXME: error if buffer is full but no \n is found.
         return MCMC_WANT_READ;
     }
 
-    // Noting where a potential value would start inside the buffer.
-    if (el - b < ctx->buffer_used) {
-        ctx->value_offset = el - b + 1;
-        ctx->value_buf_remain = ctx->buffer_used - ctx->value_offset;
-    } else {
-        ctx->value_offset = 0;
-        ctx->value_buf_remain = 0;
-    }
+    // Consume through the newline.
+    // buffer_tail now points to where a value could start.
+    ctx->buffer_tail = el+1;
 
     // FIXME: the server must be stricter in what it sends back. should always
     // have a \r. check for it and fail?
+    ctx->buffer_request_len = el - buf;
     if (el != buf && *(el-1) == '\r') {
-        ctx->buffer_request_end = el-1; // back up to the \r character.
-    } else {
-        ctx->buffer_request_end = el;
+        ctx->buffer_request_len--;
     }
     ctx->buffer_head = buf;
     // TODO: handling for nonblock case.
@@ -474,12 +482,15 @@ int mcmc_read_value(void *c, char *val, const size_t vsize, int *read) {
     mcmc_ctx_t *ctx = (mcmc_ctx_t *)c;
     size_t l;
 
-    if (ctx->value_buf_remain) {
-        int tocopy = ctx->value_buf_remain > vsize ? vsize : ctx->value_buf_remain;
-        memcpy(val + *read, ctx->buffer_head+ctx->value_offset, tocopy);
-        ctx->value_buf_remain -= tocopy;
+    // If the distance between tail/head is smaller than what we read into the
+    // main buffer, we have some value to copy out.
+    int leftover = ctx->buffer_used - (ctx->buffer_tail - ctx->buffer_head);
+    if (leftover > 0) {
+        int tocopy = leftover > vsize ? vsize : leftover;
+        memcpy(val + *read, ctx->buffer_tail, tocopy);
+        ctx->buffer_tail += tocopy;
         *read += tocopy;
-        if (ctx->value_buf_remain) {
+        if (leftover > tocopy) {
             // FIXME: think we need a specific code for "value didn't fit"
             return MCMC_WANT_READ;
         }
@@ -508,33 +519,22 @@ int mcmc_read_value(void *c, char *val, const size_t vsize, int *read) {
 
 char *mcmc_buffer_consume(void *c, int *remain) {
     mcmc_ctx_t *ctx = (mcmc_ctx_t *)c;
+    ctx->buffer_used -= ctx->buffer_tail - ctx->buffer_head;
     int used = ctx->buffer_used;
-    // first, advance buffer to end of the current request.
-    char *buf = ctx->buffer_request_end;
-    used -= buf - ctx->buffer_head;
+    char *newbuf = ctx->buffer_tail;
 
-    // TODO: what parts of ctx do we need to advance/clear out?
-    // buffer_head, _used, etc?
+    // FIXME: request_queue-- is in the wrong place.
+    // TODO: which of these _must_ be reset between requests? I think very
+    // little?
     ctx->request_queue--;
     ctx->response_type = 0;
-
-    // If there was a value, advance over everything.
-    // FIXME: need better internal indicator for how far to jump forward?
-    /*if (ctx->status_flags & FLAG_BUF_HAS_VALUE) {
-        if (used >= ctx->vsize) {
-            used -= ctx->vsize;
-            buf += ctx->vsize;
-        } else {
-            buf += used;
-            used = 0;
-        }
-    }*/
-    // FIXME: need to stay in value read mode.
     ctx->status_flags = 0;
+    ctx->buffer_head = NULL;
+    ctx->buffer_tail = NULL;
 
     if (used) {
         *remain = used;
-        return buf;
+        return newbuf;
     } else {
         return NULL;
     }
