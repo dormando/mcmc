@@ -10,54 +10,83 @@ static void show_response(void *c, char *rbuf, size_t bufsize) {
     int status;
     // buffer shouldn't change until the read is completed.
     mcmc_resp_t resp;
-    status = mcmc_read(c, rbuf, bufsize, &resp);
-    if (status == MCMC_OK) {
-        // OK means a response of some kind was read.
-        char *val;
-        // NOTE: is "it's not a miss, and vlen is 0" enough to indicate that
-        // a 0 byte value was returned?
-        if (resp.vlen != 0) {
-            if (resp.vlen == resp.vlen_read) {
-                val = resp.value;
-            } else {
-                val = malloc(resp.vlen);
-                int read = 0;
-                do {
-                    status = mcmc_read_value(c, val, resp.vlen, &read);
-                } while (status == MCMC_WANT_READ);
+    int go = 1;
+    while (go) {
+        go = 0;
+        status = mcmc_read(c, rbuf, bufsize, &resp);
+        if (status == MCMC_OK) {
+            // OK means a response of some kind was read.
+            char *val;
+            // NOTE: is "it's not a miss, and vlen is 0" enough to indicate that
+            // a 0 byte value was returned?
+            if (resp.vlen != 0) {
+                if (resp.vlen == resp.vlen_read) {
+                    val = resp.value;
+                } else {
+                    val = malloc(resp.vlen);
+                    int read = 0;
+                    do {
+                        status = mcmc_read_value(c, val, resp.vlen, &read);
+                    } while (status == MCMC_WANT_READ);
+                }
+                if (resp.vlen > 0) {
+                    val[resp.vlen-1] = '\0';
+                    printf("Response value: %s\n", val);
+                }
             }
-            if (resp.vlen > 0) {
-                val[resp.vlen-1] = '\0';
-                printf("Response value: %s\n", val);
+            switch (resp.type) {
+                case MCMC_RESP_FAIL:
+                    // resp.fail_code
+                    break;
+                case MCMC_RESP_GET:
+                    // GET's need to continue until END is seen.
+                    printf("in GET mode\n");
+                    go = 1;
+                    break;
+                case MCMC_RESP_END: // ascii done-with-get's
+                    printf("END seen\n");
+                    break;
+                case MCMC_RESP_META: // any meta command. they all return the same.
+                    break;
+                case MCMC_RESP_STAT:
+                    // STAT responses. need to call mcmc_read() in loop until
+                    // we get an end signal.
+                    go = 1;
+                    break;
+                default:
+                    // TODO: type -> str func.
+                    fprintf(stderr, "unknown response type: %d\n", resp.type);
+                    break;
             }
+        } else {
+            // some kind of command specific error code (management commands)
+            // or protocol error status.
+            char code[MCMC_ERROR_CODE_MAX];
+            char msg[MCMC_ERROR_MSG_MAX];
+            mcmc_get_error(c, code, MCMC_ERROR_CODE_MAX, msg, MCMC_ERROR_MSG_MAX);
+            fprintf(stderr, "Got error from mc: status [%d] code [%s] msg: [%s]\n", status, code, msg);
+            // some errors don't have a msg. in this case msg[0] will be \0
         }
-        switch (resp.type) {
-            case MCMC_RESP_FAIL:
-                // resp.fail_code
-                break;
-            case MCMC_RESP_GET:
-                break;
-            case MCMC_RESP_MISS: // ascii or meta miss.
-                break;
-            case MCMC_RESP_META: // any meta command. they all return the same.
-                break;
-            case MCMC_RESP_STAT:
-                // STAT responses. need to call mcmc_read() in loop until
-                // we get an end signal.
-                break;
-            default:
-                // TODO: type -> str func.
-                fprintf(stderr, "unknown response type: %d\n", resp.type);
-                break;
+
+        int remain = 0;
+        // advance us to the next command in the buffer, or ready for the next
+        // mc_read().
+        char *newbuf = mcmc_buffer_consume(c, &remain);
+        printf("remains in buffer: %d\n", remain);
+        if (remain == 0) {
+            assert(newbuf == NULL);
+            // we're done.
+        } else {
+            // there're still some bytes unconsumed by the client.
+            // ensure the next time we call the client, the buffer has those
+            // bytes at the front still.
+            // NOTE: this _could_ be an entirely different buffer if we copied
+            // the data off. The client is just tracking the # of bytes it
+            // didn't gobble.
+            // In this case we shuffle the bytes back to the front of our read
+            // buffer.
+            memmove(rbuf, newbuf, remain);
         }
-    } else {
-        // some kind of command specific error code (management commands)
-        // or protocol error status.
-        char code[MCMC_ERROR_CODE_MAX];
-        char msg[MCMC_ERROR_MSG_MAX];
-        mcmc_get_error(c, code, MCMC_ERROR_CODE_MAX, msg, MCMC_ERROR_MSG_MAX);
-        fprintf(stderr, "Got error from mc: code [%s] msg: [%s]\n", code, msg);
-        // some errors don't have a msg. in this case msg[0] will be \0
     }
 }
 
@@ -103,25 +132,6 @@ int main (int argc, char *agv[]) {
         // Regardless of what command we sent, this should print out the response.
         show_response(c, rbuf, bufsize);
 
-        int remain = 0;
-        // advance us to the next command in the buffer, or ready for the next
-        // mc_read().
-        char *newbuf = mcmc_buffer_consume(c, &remain);
-        printf("remains in buffer: %d\n", remain);
-        if (remain == 0) {
-            assert(newbuf == NULL);
-            // we're done.
-        } else {
-            // there're still some bytes unconsumed by the client.
-            // ensure the next time we call the client, the buffer has those
-            // bytes at the front still.
-            // NOTE: this _could_ be an entirely different buffer if we copied
-            // the data off. The client is just tracking the # of bytes it
-            // didn't gobble.
-            // In this case we shuffle the bytes back to the front of our read
-            // buffer.
-            memmove(rbuf, newbuf, remain);
-        }
     }
 
     status = mcmc_disconnect(c);

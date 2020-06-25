@@ -23,6 +23,7 @@
 
 #define FLAG_BUF_IS_ERROR 0x1
 #define FLAG_BUF_IS_NUMERIC 0x2
+#define FLAG_BUF_WANTED_READ 0x4
 
 #define STATE_DEFAULT 0 // looking for any kind of response
 #define STATE_GET_RESP 1 // processing VALUE's until END
@@ -37,7 +38,6 @@ typedef struct mcmc_ctx {
     int request_queue; // supposed outstanding replies.
     int fail_code; // recent failure reason.
     int error; // latest error code.
-    int response_type; // type of response value for user to handle.
     uint32_t status_flags; // internal only flags.
     int state;
 
@@ -173,7 +173,8 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
             switch (buf[0]) {
             case 'E':
                 if (buf[1] == 'N') {
-                    rv = MCMC_MISS;
+                    rv = MCMC_OK;
+                    // TODO: RESP type
                 } else if (buf[1] == 'X') {
                     fail = MCMC_FAIL_EXISTS;
                 }
@@ -246,24 +247,16 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
             break;
         case 3:
             if (memcmp(buf, "END", 3) == 0) {
-                if (ctx->state == STATE_STAT_RESP) {
-                    // seen some STAT responses, now this completes it.
-                    ctx->state = STATE_STAT_RESP_DONE;
-                } else if (ctx->state == STATE_GET_RESP) {
-                    // seen at least one VALUE line, so this can't "miss"
-                    // TODO: need to quietly push the buffer?
-                    ctx->state = STATE_DEFAULT;
-                    rv = MCMC_OK;
-                } else {
-                    // END alone means one or more ASCII GET's but no VALUE's.
-                    rv = MCMC_MISS;
-                }
+                // Either end of STAT results, or end of ascii GET key list.
+                ctx->state = STATE_DEFAULT;
+                r->type = MCMC_RESP_END;
+                rv = MCMC_OK;
             }
             break;
         case 4:
             if (memcmp(buf, "STAT", 4) == 0) {
                 rv = MCMC_OK;
-                ctx->response_type = MCMC_RESP_STAT;
+                r->type = MCMC_RESP_STAT;
                 ctx->state = STATE_STAT_RESP;
                 // TODO: initialize stat reader mode.
             }
@@ -425,7 +418,18 @@ int mcmc_send_request(void *c, char *request, int len, int count) {
 // TODO: avoid recv if we have bytes in the buffer.
 int mcmc_read(void *c, char *buf, size_t bufsize, mcmc_resp_t *r) {
     mcmc_ctx_t *ctx = (mcmc_ctx_t *)c;
+    char *el;
     memset(r, 0, sizeof(*r));
+
+    // If there's still data in the buffer try to use it before potentially
+    // hanging on the network read.
+    // Also skip this check if we specifically wanted more bytes from net.
+    if (ctx->buffer_used && !(ctx->status_flags & FLAG_BUF_WANTED_READ)) {
+        el = memchr(buf, '\n', ctx->buffer_used);
+        if (el) {
+            goto parse;
+        }
+    }
 
     // adjust buffer by how far we've already consumed.
     char *b = buf + ctx->buffer_used;
@@ -442,12 +446,13 @@ int mcmc_read(void *c, char *buf, size_t bufsize, mcmc_resp_t *r) {
     ctx->buffer_used += read;
 
     // Always scan from the start of the original buffer.
-    char *el = memchr(buf, '\n', ctx->buffer_used);
+    el = memchr(buf, '\n', ctx->buffer_used);
     if (!el) {
         // FIXME: error if buffer is full but no \n is found.
+        ctx->status_flags |= FLAG_BUF_WANTED_READ;
         return MCMC_WANT_READ;
     }
-
+parse:
     // Consume through the newline.
     // buffer_tail now points to where a value could start.
     ctx->buffer_tail = el+1;
@@ -527,7 +532,6 @@ char *mcmc_buffer_consume(void *c, int *remain) {
     // TODO: which of these _must_ be reset between requests? I think very
     // little?
     ctx->request_queue--;
-    ctx->response_type = 0;
     ctx->status_flags = 0;
     ctx->buffer_head = NULL;
     ctx->buffer_tail = NULL;

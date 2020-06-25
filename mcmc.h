@@ -8,7 +8,6 @@
 #define MCMC_CONNECTING 3 // nonblock mode.
 #define MCMC_WANT_WRITE 4
 #define MCMC_WANT_READ 5
-#define MCMC_MISS 6
 #define MCMC_HAS_RESULT 7
 // TODO: either internally set a flag for "ok" or "not ok" and use a func,
 // or use a bitflag here (1<<6) for "OK", (1<<5) for "FAIL", etc.
@@ -32,7 +31,7 @@
 #define MCMC_RESP_STAT 102
 #define MCMC_RESP_FAIL 103
 #define MCMC_RESP_GENERIC 104
-#define MCMC_RESP_MISS 105
+#define MCMC_RESP_END 105
 
 #define MCMC_OPTION_BLANK 0
 
