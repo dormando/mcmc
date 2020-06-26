@@ -35,9 +35,6 @@ static void show_response(void *c, char *rbuf, size_t bufsize) {
                 }
             }
             switch (resp.type) {
-                case MCMC_RESP_FAIL:
-                    // resp.fail_code
-                    break;
                 case MCMC_RESP_GET:
                     // GET's need to continue until END is seen.
                     printf("in GET mode\n");
@@ -47,6 +44,11 @@ static void show_response(void *c, char *rbuf, size_t bufsize) {
                     printf("END seen\n");
                     break;
                 case MCMC_RESP_META: // any meta command. they all return the same.
+                    printf("META response seen\n");
+                    if (resp.rlen > 0) {
+                        resp.rline[resp.rlen-1] = '\0';
+                        printf("META response line: %s\n", resp.rline);
+                    }
                     break;
                 case MCMC_RESP_STAT:
                     // STAT responses. need to call mcmc_read() in loop until
@@ -113,8 +115,10 @@ int main (int argc, char *agv[]) {
         return -1;
     }
 
-    char *requests[3] = {"get foo\r\n",
+    char *requests[5] = {"get foo\r\n",
         "get foob\r\n",
+        "mg foo s t v\r\n",
+        "mg doof s t v Omoo k\r\n",
         ""};
 
     for (int x = 0; strlen(requests[x]) != 0; x++) {
@@ -123,6 +127,7 @@ int main (int argc, char *agv[]) {
         // FIXME: not confident "number of expected responses" is worth tracking
         // internally.
         status = mcmc_send_request(c, requests[x], strlen(requests[x]), 1);
+        //printf("sent request: %s\n", requests[x]);
 
         if (status != MCMC_OK) {
             fprintf(stderr, "Failed to send request to memcached\n");

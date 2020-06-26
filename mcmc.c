@@ -64,6 +64,8 @@ static int _mcmc_parse_value_line(mcmc_ctx_t *ctx) {
     int keylen;
     p = memchr(p, ' ', l - 6);
     if (p == NULL) {
+        // FIXME: these should return MCMC_ERR and set the internal parse
+        // error code.
         return MCMC_PARSE_ERROR;
     }
 
@@ -157,9 +159,10 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
         return MCMC_ERR;
     }
 
-    int rv = -1;
-    int fail = -1;
+    int rv = MCMC_OK;
+    int code = MCMC_CODE_OK;
     mcmc_resp_t *r = ctx->resp;
+    r->type = MCMC_RESP_GENERIC;
     switch (rlen) {
         case 2:
             // meta, "OK"
@@ -170,29 +173,33 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
             // data" types?
             // As-is it should fail down to the "send the return code to the
             // user". not sure that's right.
+            r->type = MCMC_RESP_META;
             switch (buf[0]) {
             case 'E':
                 if (buf[1] == 'N') {
-                    rv = MCMC_OK;
+                    code = MCMC_CODE_MISS;
                     // TODO: RESP type
                 } else if (buf[1] == 'X') {
-                    fail = MCMC_FAIL_EXISTS;
+                    code = MCMC_CODE_EXISTS;
                 }
                 break;
             case 'M':
                 if (buf[1] == 'N') {
                     // specific return code so user can see pipeline end.
-                    rv = MCMC_NOP;
+                    code = MCMC_CODE_NOP;
                 } else if (buf[1] == 'E') {
                     // ME is the debug output line.
+                    // TODO: this just gets returned as an rline?
+                    // specific code? specific type?
+                    // ME <key> <key=value debug line>
                     rv = MCMC_OK;
                 }
                 break;
             case 'N':
                 if (buf[1] == 'F') {
-                    fail = MCMC_FAIL_NOT_FOUND;
+                    code = MCMC_CODE_NOT_FOUND;
                 } else if (buf[1] == 'S') {
-                    fail = MCMC_FAIL_NOT_STORED;
+                    code = MCMC_CODE_NOT_STORED;
                 }
                 break;
             case 'O':
@@ -200,7 +207,6 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
                     // FIXME: think I really screwed myself changing
                     // everything to OK instead of HD.
                     // bare OK could mean RESP_META or RESP_GENERIC :(
-                    rv = MCMC_OK;
                 }
                 break;
             case 'V':
@@ -227,7 +233,6 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
                             if (*cur != ' ') {
                                 more = 0;
                             }
-                            rv = MCMC_OK;
                         }
                     } else {
                         rv = MCMC_ERR;
@@ -249,6 +254,7 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
             if (memcmp(buf, "END", 3) == 0) {
                 // Either end of STAT results, or end of ascii GET key list.
                 ctx->state = STATE_DEFAULT;
+                // FIXME:is this actually a code?
                 r->type = MCMC_RESP_END;
                 rv = MCMC_OK;
             }
@@ -275,7 +281,8 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
             if (memcmp(buf, "STORED", 6) == 0) {
                 rv = MCMC_STORED;
             } else if (memcmp(buf, "EXISTS", 6) == 0) {
-                fail = MCMC_FAIL_EXISTS;
+                code = MCMC_CODE_EXISTS;
+                // TODO: type -> ASCII?
             }
             break;
         case 7:
@@ -286,16 +293,17 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
             } else if (memcmp(buf, "VERSION", 7) == 0) {
                 rv = MCMC_VERSION;
                 // TODO: prep the version line for return
+                // TODO: resp type?
             }
             break;
         case 9:
             if (memcmp(buf, "NOT_FOUND", 9) == 0) {
-                fail = MCMC_FAIL_NOT_FOUND;
+                code = MCMC_CODE_NOT_FOUND;
             }
             break;
         case 10:
             if (memcmp(buf, "NOT_STORED", 10) == 0) {
-                fail = MCMC_FAIL_NOT_STORED;
+                code = MCMC_CODE_NOT_STORED;
             }
             break;
         default:
@@ -303,10 +311,8 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
             break;
     }
 
-    if (fail != -1) {
-        ctx->fail_code = fail;
-        rv = MCMC_FAIL;
-    } else if (rv == -1) {
+    r->code = code;
+    if (rv == -1) {
         ctx->status_flags |= FLAG_BUF_IS_ERROR;
         rv = MCMC_ERR;
     }
