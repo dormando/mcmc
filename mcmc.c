@@ -6,6 +6,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <errno.h>
+#include <stdio.h>
 
 #include "mcmc.h"
 
@@ -135,7 +136,8 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
     int rlen; // response code length.
     int more = 0;
 
-    while (l--) {
+    // walk until the \r\n
+    while (l-- > 2) {
         if (*cur == ' ') {
             more = 1;
             break;
@@ -162,6 +164,7 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
     int rv = MCMC_OK;
     int code = MCMC_CODE_OK;
     mcmc_resp_t *r = ctx->resp;
+    r->reslen = ctx->buffer_request_len;
     r->type = MCMC_RESP_GENERIC;
     switch (rlen) {
         case 2:
@@ -244,7 +247,7 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
             // if (more), there are flags. shove them in the right place.
             if (more) {
                 r->rline = cur+1; // eat the space.
-                r->rlen = l;
+                r->rlen = l-1;
             } else {
                 r->rline = NULL;
                 r->rlen = 0;
@@ -399,11 +402,11 @@ end:
 
 // NOTE: if WANT_WRITE returned, call with same arguments.
 // FIXME: len -> size_t?
-int mcmc_send_request(void *c, char *request, int len, int count) {
+int mcmc_send_request(void *c, const char *request, int len, int count) {
     mcmc_ctx_t *ctx = (mcmc_ctx_t *)c;
 
     // adjust our send buffer by how much has already been sent.
-    char *r = request + ctx->sent_bytes_partial;
+    const char *r = request + ctx->sent_bytes_partial;
     int l = len - ctx->sent_bytes_partial;
     int sent = send(ctx->fd, r, l, 0);
     if (sent == -1) {
@@ -465,10 +468,8 @@ parse:
 
     // FIXME: the server must be stricter in what it sends back. should always
     // have a \r. check for it and fail?
-    ctx->buffer_request_len = el - buf;
-    if (el != buf && *(el-1) == '\r') {
-        ctx->buffer_request_len--;
-    }
+    ctx->buffer_request_len = ctx->buffer_tail - buf;
+    // leave the \r\n in the line end cache.
     ctx->buffer_head = buf;
     // TODO: handling for nonblock case.
 

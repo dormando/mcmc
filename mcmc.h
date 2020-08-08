@@ -45,7 +45,8 @@ typedef struct {
     unsigned short type;
     unsigned short code;
     char *value;
-    size_t vlen;
+    size_t reslen; // full length of the response line
+    size_t vlen; // reslen + vlen is the full length of the response.
     size_t vlen_read;
     union {
         // META response
@@ -72,7 +73,7 @@ typedef struct {
 size_t mcmc_size(int options);
 size_t mcmc_min_buffer_size(int options);
 int mcmc_connect(void *c, char *host, char *port, int options);
-int mcmc_send_request(void *c, char *request, int len, int count);
+int mcmc_send_request(void *c, const char *request, int len, int count);
 int mcmc_read(void *c, char *buf, size_t bufsize, mcmc_resp_t *r);
 int mcmc_read_value(void *c, char *val, const size_t vsize, int *read);
 char *mcmc_buffer_consume(void *c, int *remain);
