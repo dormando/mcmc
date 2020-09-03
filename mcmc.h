@@ -12,11 +12,11 @@
 // TODO: either internally set a flag for "ok" or "not ok" and use a func,
 // or use a bitflag here (1<<6) for "OK", (1<<5) for "FAIL", etc.
 // or, we directly return "OK" or "FAIL" and you can ask for specific error.
-#define MCMC_STORED 8
+#define MCMC_CODE_STORED 8
 #define MCMC_CODE_EXISTS 9
-#define MCMC_DELETED 10
-#define MCMC_TOUCHED 11
-#define MCMC_VERSION 12
+#define MCMC_CODE_DELETED 10
+#define MCMC_CODE_TOUCHED 11
+#define MCMC_CODE_VERSION 12
 #define MCMC_CODE_NOT_FOUND 13
 #define MCMC_CODE_NOT_STORED 14
 #define MCMC_CODE_OK 15
@@ -33,6 +33,7 @@
 #define MCMC_RESP_STAT 102
 #define MCMC_RESP_GENERIC 104
 #define MCMC_RESP_END 105
+#define MCMC_RESP_VERSION 106
 
 #define MCMC_OPTION_BLANK 0
 

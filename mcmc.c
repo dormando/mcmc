@@ -264,7 +264,6 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
             break;
         case 4:
             if (memcmp(buf, "STAT", 4) == 0) {
-                rv = MCMC_OK;
                 r->type = MCMC_RESP_STAT;
                 ctx->state = STATE_STAT_RESP;
                 // TODO: initialize stat reader mode.
@@ -282,7 +281,7 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
             break;
         case 6:
             if (memcmp(buf, "STORED", 6) == 0) {
-                rv = MCMC_STORED;
+                code = MCMC_CODE_STORED;
             } else if (memcmp(buf, "EXISTS", 6) == 0) {
                 code = MCMC_CODE_EXISTS;
                 // TODO: type -> ASCII?
@@ -290,13 +289,13 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
             break;
         case 7:
             if (memcmp(buf, "DELETED", 7) == 0) {
-                rv = MCMC_DELETED;
+                code = MCMC_CODE_DELETED;
             } else if (memcmp(buf, "TOUCHED", 7) == 0) {
-                rv = MCMC_TOUCHED;
+                code = MCMC_CODE_TOUCHED;
             } else if (memcmp(buf, "VERSION", 7) == 0) {
-                rv = MCMC_VERSION;
+                code = MCMC_CODE_VERSION;
+                r->type = MCMC_RESP_VERSION;
                 // TODO: prep the version line for return
-                // TODO: resp type?
             }
             break;
         case 9:
@@ -316,6 +315,7 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
 
     r->code = code;
     if (rv == -1) {
+        // TODO: Finish this.
         ctx->status_flags |= FLAG_BUF_IS_ERROR;
         rv = MCMC_ERR;
     }
