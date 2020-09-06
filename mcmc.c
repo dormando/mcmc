@@ -325,6 +325,11 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
 
 // EXTERNAL API
 
+int mcmc_fd(void *c) {
+    mcmc_ctx_t *ctx = (mcmc_ctx_t *)c;
+    return ctx->fd;
+}
+
 size_t mcmc_size(int options) {
     return sizeof(mcmc_ctx_t);
 }

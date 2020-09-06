@@ -71,6 +71,7 @@ typedef struct {
     };
 } mcmc_resp_t;
 
+int mcmc_fd(void *c);
 size_t mcmc_size(int options);
 size_t mcmc_min_buffer_size(int options);
 int mcmc_connect(void *c, char *host, char *port, int options);
