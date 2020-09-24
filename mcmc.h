@@ -36,6 +36,7 @@
 #define MCMC_RESP_VERSION 106
 
 #define MCMC_OPTION_BLANK 0
+#define MCMC_OPTION_NONBLOCK 1
 
 // convenience defines. if you want to save RAM you can set these smaller and
 // error handler will only copy what you ask for.

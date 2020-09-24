@@ -3,6 +3,7 @@
 #include <sys/socket.h>
 #include <netdb.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <string.h>
 #include <stdint.h>
 #include <errno.h>
@@ -257,7 +258,6 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
             if (memcmp(buf, "END", 3) == 0) {
                 // Either end of STAT results, or end of ascii GET key list.
                 ctx->state = STATE_DEFAULT;
-                // FIXME:is this actually a code?
                 r->type = MCMC_RESP_END;
                 rv = MCMC_OK;
             }
@@ -341,6 +341,8 @@ size_t mcmc_min_buffer_size(int options) {
     return MIN_BUFFER_SIZE;
 }
 
+// TODO: should be able to flip between block and nonblock.
+
 // TODO:
 // - option for connecting 4 -> 6 or 6 -> 4
 // connect_unix()
@@ -352,7 +354,7 @@ int mcmc_connect(void *c, char *host, char *port, int options) {
 
     int s;
     int sock;
-    int res = MCMC_OK;
+    int res = MCMC_CONNECTED;
     struct addrinfo hints;
     struct addrinfo *ai;
     struct addrinfo *next;
@@ -383,9 +385,32 @@ int mcmc_connect(void *c, char *host, char *port, int options) {
             continue;
 
         // TODO: NONBLOCK
-        // TODO: BIND local port.
-        if (connect(sock, next->ai_addr, next->ai_addrlen) != -1)
+        if (options & MCMC_OPTION_NONBLOCK) {
+            int flags = fcntl(sock, F_GETFL);
+            if (flags < 0) {
+                res = MCMC_ERR;
+                close(sock);
+                goto end;
+            }
+            if (fcntl(sock, F_SETFL, flags | O_NONBLOCK) < 0) {
+                res = MCMC_ERR;
+                close(sock);
+                goto end;
+            }
+            res = MCMC_CONNECTING;
+
+            if (connect(sock, next->ai_addr, next->ai_addrlen) != -1) {
+                if (errno == EINPROGRESS) {
+                    break; // We're good, stop the loop.
+                }
+            }
+
             break;
+        } else {
+            // TODO: BIND local port.
+            if (connect(sock, next->ai_addr, next->ai_addrlen) != -1)
+                break;
+        }
 
         close(sock);
     }
@@ -397,7 +422,6 @@ int mcmc_connect(void *c, char *host, char *port, int options) {
     }
 
     ctx->fd = sock;
-    res = MCMC_CONNECTED;
 end:
     if (ai) {
         freeaddrinfo(ai);
@@ -415,10 +439,16 @@ int mcmc_send_request(void *c, const char *request, int len, int count) {
     int l = len - ctx->sent_bytes_partial;
     int sent = send(ctx->fd, r, l, 0);
     if (sent == -1) {
-        return MCMC_ERR;
+        // implicitly handle nonblock mode.
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            return MCMC_WANT_WRITE;
+        } else {
+            return MCMC_ERR;
+        }
     }
 
     if (sent < len) {
+        // can happen anytime, but mostly in nonblocking mode.
         ctx->sent_bytes_partial += sent;
         return MCMC_WANT_WRITE;
     } else {
@@ -452,9 +482,13 @@ int mcmc_read(void *c, char *buf, size_t bufsize, mcmc_resp_t *r) {
     int read = recv(ctx->fd, b, l, 0);
     if (read == 0) {
         return MCMC_NOT_CONNECTED;
-    }
-    if (read == -1) {
-        return MCMC_ERR;
+    } else if (read == -1) {
+        // implicitly handle nonblocking configurations.
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            return MCMC_WANT_READ;
+        } else {
+            return MCMC_ERR;
+        }
     }
 
     ctx->buffer_used += read;

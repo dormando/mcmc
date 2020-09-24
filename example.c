@@ -3,6 +3,7 @@
 #include <string.h>
 #include <assert.h>
 #include <stdint.h>
+#include <poll.h>
 
 #include "mcmc.h"
 
@@ -145,7 +146,56 @@ int main (int argc, char *agv[]) {
 
     // TODO: stats example.
 
-    // TODO: nonblock example.
+    // nonblocking example.
+    c = malloc(mcmc_size(MCMC_OPTION_BLANK));
+    // reuse bufsize/rbuf.
+    status = mcmc_connect(c, "127.0.0.1", "11211", MCMC_OPTION_NONBLOCK);
+    struct pollfd pfds[1];
+    if (status == MCMC_CONNECTING) {
+        // need to wait for socket to become writeable.
+        pfds[0].fd = mcmc_fd(c);
+        pfds[0].events = POLLOUT;
+        if (poll(pfds, 1, 1000) != 1) {
+            fprintf(stderr, "poll on connect timed out or failed\n");
+            return -1;
+        }
+        if (pfds[0].revents & POLLOUT) {
+            printf("asynchronous connection completed\n");
+        }
+    } else {
+        perror("connect");
+        fprintf(stderr, "bad response to nonblock connection: %d\n", status);
+        return -1;
+    }
+
+    // TODO: check socket for errors.
+
+    // TODO: send request
+    status = mcmc_send_request(c, requests[0], strlen(requests[0]), 1);
+    //printf("sent request: %s\n", requests[x]);
+
+    if (status != MCMC_OK) {
+        fprintf(stderr, "Failed to send request to memcached\n");
+        return -1;
+    }
+
+    mcmc_resp_t resp;
+    status = mcmc_read(c, rbuf, bufsize, &resp);
+    // this could race and fail, depending on the system.
+    if (status == MCMC_WANT_READ) {
+        printf("got MCMC_WANT_READ from a too-fast read as expected\n");
+        pfds[0].fd = mcmc_fd(c);
+        pfds[0].events = POLLIN;
+        if (poll(pfds, 1, 1000) != 1) {
+            fprintf(stderr, "poll on connect timed out or failed\n");
+            return -1;
+        }
+        if (pfds[0].revents & POLLIN) {
+            printf("asynchronous read ready\n");
+        }
+
+        show_response(c, rbuf, bufsize);
+    }
 
     return 0;
 }
