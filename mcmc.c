@@ -344,13 +344,11 @@ size_t mcmc_min_buffer_size(int options) {
 // TODO: should be able to flip between block and nonblock.
 
 // used for checking on async connections.
-// FIXME: need to rename this? I think calling SO_ERROR is only right after an
-// nonblock-connect() call, so people might confuse this and use it wrong.
-int mcmc_check_connection(void *c, int *err) {
+int mcmc_check_nonblock_connect(void *c, int *err) {
     mcmc_ctx_t *ctx = (mcmc_ctx_t *)c;
     socklen_t errsize = sizeof(*err);
     if (getsockopt(ctx->fd, SOL_SOCKET, SO_ERROR, err, &errsize) == 0) {
-        if (err == 0) {
+        if (*err == 0) {
             return MCMC_OK;
         }
     } else {

@@ -168,7 +168,7 @@ int main (int argc, char *agv[]) {
             return -1;
         }
         int err = 0;
-        if (pfds[0].revents & POLLOUT && mcmc_check_connection(c, &err) == MCMC_OK) {
+        if (pfds[0].revents & POLLOUT && mcmc_check_nonblock_connect(c, &err) == MCMC_OK) {
             printf("asynchronous connection completed: %d\n", err);
         } else {
             printf("failed to connect: %s\n", strerror(err));
