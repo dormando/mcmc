@@ -4,6 +4,7 @@
 #include <assert.h>
 #include <stdint.h>
 #include <poll.h>
+#include <signal.h>
 
 #include "mcmc.h"
 
@@ -96,6 +97,12 @@ static void show_response(void *c, char *rbuf, size_t bufsize) {
 int main (int argc, char *agv[]) {
     // TODO: detect if C is pre-C11?
     printf("C version: %ld\n", __STDC_VERSION__);
+
+    if (signal(SIGPIPE, SIG_IGN) == SIG_ERR) {
+        perror("signal");
+        exit(1);
+    }
+
     void *c = malloc(mcmc_size(MCMC_OPTION_BLANK));
     // we only "need" the minimum buf size.
     // buffers large enough to fit return values result in fewer syscalls.
@@ -150,6 +157,7 @@ int main (int argc, char *agv[]) {
     c = malloc(mcmc_size(MCMC_OPTION_BLANK));
     // reuse bufsize/rbuf.
     status = mcmc_connect(c, "127.0.0.1", "11211", MCMC_OPTION_NONBLOCK);
+    printf("nonblock connecting...\n");
     struct pollfd pfds[1];
     if (status == MCMC_CONNECTING) {
         // need to wait for socket to become writeable.
@@ -159,8 +167,12 @@ int main (int argc, char *agv[]) {
             fprintf(stderr, "poll on connect timed out or failed\n");
             return -1;
         }
-        if (pfds[0].revents & POLLOUT) {
-            printf("asynchronous connection completed\n");
+        int err = 0;
+        if (pfds[0].revents & POLLOUT && mcmc_check_connection(c, &err) == MCMC_OK) {
+            printf("asynchronous connection completed: %d\n", err);
+        } else {
+            printf("failed to connect: %s\n", strerror(err));
+            return -1;
         }
     } else {
         perror("connect");
