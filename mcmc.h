@@ -78,6 +78,7 @@ size_t mcmc_min_buffer_size(int options);
 int mcmc_connect(void *c, char *host, char *port, int options);
 int mcmc_check_nonblock_connect(void *c, int *err);
 int mcmc_send_request(void *c, const char *request, int len, int count);
+int mcmc_request_writev(void *c, const struct iovec *iov, int iovcnt, ssize_t *sent, int count);
 int mcmc_read(void *c, char *buf, size_t bufsize, mcmc_resp_t *r);
 int mcmc_read_value(void *c, char *val, const size_t vsize, int *read);
 char *mcmc_buffer_consume(void *c, int *remain);

@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/uio.h>
 #include <netdb.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -447,6 +448,7 @@ end:
 
 // NOTE: if WANT_WRITE returned, call with same arguments.
 // FIXME: len -> size_t?
+// TODO: rename to mcmc_request_send
 int mcmc_send_request(void *c, const char *request, int len, int count) {
     mcmc_ctx_t *ctx = (mcmc_ctx_t *)c;
 
@@ -470,6 +472,39 @@ int mcmc_send_request(void *c, const char *request, int len, int count) {
     } else {
         ctx->request_queue += count;
         ctx->sent_bytes_partial = 0;
+    }
+
+    return MCMC_OK;
+}
+
+// TODO: pretty sure I don't want this function chewing on a submitted iov
+// stack, but it might make for less client code :(
+// so for now, lets not.
+int mcmc_request_writev(void *c, const struct iovec *iov, int iovcnt, ssize_t *sent, int count) {
+    mcmc_ctx_t *ctx = (mcmc_ctx_t *)c;
+    // need to track sent vs tosend to know when to update counters.
+    ssize_t tosend = 0;
+    for (int i = 0; i < iovcnt; i++) {
+        tosend += iov[i].iov_len;
+    }
+
+    *sent = writev(ctx->fd, iov, iovcnt);
+    if (*sent == -1) {
+        // implicitly handle nonblock mode.
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            return MCMC_WANT_WRITE;
+        } else {
+            return MCMC_ERR;
+        }
+    }
+
+    if (*sent < tosend) {
+        // can happen anytime, but mostly in nonblocking mode.
+        return MCMC_WANT_WRITE;
+    } else {
+        // FIXME: user has to keep submitting the same count value...
+        // should decide on whether or not to give up on this.
+        ctx->request_queue += count;
     }
 
     return MCMC_OK;
