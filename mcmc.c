@@ -137,6 +137,9 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
     size_t l = ctx->buffer_request_len;
     int rlen; // response code length.
     int more = 0;
+    mcmc_resp_t *r = ctx->resp;
+    r->reslen = ctx->buffer_request_len;
+    r->type = MCMC_RESP_GENERIC;
 
     // walk until the \r\n
     while (l-- > 2) {
@@ -155,6 +158,7 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
         // TODO: parse it as a number on request.
         // TODO: validate whole thing as digits here?
         ctx->status_flags |= FLAG_BUF_IS_NUMERIC;
+        r->type = MCMC_RESP_NUMERIC;
         return MCMC_OK;
     }
 
@@ -165,9 +169,6 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
 
     int rv = MCMC_OK;
     int code = MCMC_CODE_OK;
-    mcmc_resp_t *r = ctx->resp;
-    r->reslen = ctx->buffer_request_len;
-    r->type = MCMC_RESP_GENERIC;
     switch (rlen) {
         case 2:
             // meta, "OK"

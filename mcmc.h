@@ -29,11 +29,11 @@
 // response types
 #define MCMC_RESP_GET 100
 #define MCMC_RESP_META 101
-// TODO: RESP_NUMERIC for incr/decr response? or copy as value?
 #define MCMC_RESP_STAT 102
 #define MCMC_RESP_GENERIC 104
 #define MCMC_RESP_END 105
 #define MCMC_RESP_VERSION 106
+#define MCMC_RESP_NUMERIC 107 // for weird incr/decr syntax.
 
 #define MCMC_OPTION_BLANK 0
 #define MCMC_OPTION_NONBLOCK 1
