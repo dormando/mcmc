@@ -46,14 +46,14 @@
 typedef struct {
     unsigned short type;
     unsigned short code;
-    char *value;
+    char *value; // pointer to start of value in buffer.
     size_t reslen; // full length of the response line
+    size_t vlen_read; // amount of value that was in supplied buffer.
     size_t vlen; // reslen + vlen is the full length of the response.
-    size_t vlen_read;
     union {
         // META response
         struct {
-            char *rline;
+            char *rline; // start of meta response line.
             size_t rlen;
         };
         // GET response
@@ -75,6 +75,7 @@ typedef struct {
 int mcmc_fd(void *c);
 size_t mcmc_size(int options);
 size_t mcmc_min_buffer_size(int options);
+int mcmc_parse_buf(void *c, char *buf, size_t len, mcmc_resp_t *r);
 int mcmc_connect(void *c, char *host, char *port, int options);
 int mcmc_check_nonblock_connect(void *c, int *err);
 int mcmc_send_request(void *c, const char *request, int len, int count);

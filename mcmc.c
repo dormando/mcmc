@@ -342,6 +342,40 @@ size_t mcmc_min_buffer_size(int options) {
     return MIN_BUFFER_SIZE;
 }
 
+// Directly parse a buffer with read data of size len.
+// r->reslen + r->vlen_read is the bytes consumed from the buffer read.
+// Caller manages how to retry if MCMC_WANT_READ or an error happens.
+int mcmc_parse_buf(void *c, char *buf, size_t len, mcmc_resp_t *r) {
+    mcmc_ctx_t *ctx = c;
+    char *el;
+
+    el = memchr(buf, '\n', len);
+    if (el == NULL) {
+        return MCMC_WANT_READ;
+    }
+
+    memset(r, 0, sizeof(*r));
+
+    // Consume through the newline.
+    // buffer_tail now points to where value could start.
+    // FIXME: ctx->value ?
+    ctx->buffer_tail = el+1;
+
+    // FIXME: the server must be stricter in what it sends back. should always
+    // have a \r. check for it and fail?
+    ctx->buffer_request_len = ctx->buffer_tail - buf;
+    // leave the \r\n in the line end cache.
+    ctx->buffer_head = buf;
+    // TODO: handling for nonblock case.
+
+    // We have a result line. Now pass it through the parser.
+    // Then we indicate to the user that a response is ready.
+    ctx->resp = r;
+    return _mcmc_parse_response(ctx);
+}
+
+/*** Functions wrapping syscalls **/
+
 // TODO: should be able to flip between block and nonblock.
 
 // used for checking on async connections.
