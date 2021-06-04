@@ -260,6 +260,8 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
             if (memcmp(buf, "END", 3) == 0) {
                 // Either end of STAT results, or end of ascii GET key list.
                 ctx->state = STATE_DEFAULT;
+                // FIXME: caller needs to understand if this is a real miss.
+                code = MCMC_CODE_MISS;
                 r->type = MCMC_RESP_END;
                 rv = MCMC_OK;
             }
