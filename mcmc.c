@@ -189,6 +189,12 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
                     code = MCMC_CODE_EXISTS;
                 }
                 break;
+            case 'H':
+                if (buf[1] == 'D') {
+                    // typical meta response.
+                    code = MCMC_CODE_OK;
+                }
+                break;
             case 'M':
                 if (buf[1] == 'N') {
                     // specific return code so user can see pipeline end.
@@ -210,9 +216,8 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
                 break;
             case 'O':
                 if (buf[1] == 'K') {
-                    // FIXME: think I really screwed myself changing
-                    // everything to OK instead of HD.
-                    // bare OK could mean RESP_META or RESP_GENERIC :(
+                    // Used by many random management commands
+                    r->type = MCMC_RESP_GENERIC;
                 }
                 break;
             case 'V':
