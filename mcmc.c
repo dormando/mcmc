@@ -350,14 +350,25 @@ size_t mcmc_min_buffer_size(int options) {
     return MIN_BUFFER_SIZE;
 }
 
+char *mcmc_read_prep(void *c, char *buf, size_t bufsize, size_t *bufremain) {
+    mcmc_ctx_t *ctx = c;
+    char *b = buf + ctx->buffer_used;
+    *bufremain = bufsize - ctx->buffer_used;
+    return b;
+}
+
 // Directly parse a buffer with read data of size len.
 // r->reslen + r->vlen_read is the bytes consumed from the buffer read.
 // Caller manages how to retry if MCMC_WANT_READ or an error happens.
-int mcmc_parse_buf(void *c, char *buf, size_t len, mcmc_resp_t *r) {
+// FIXME: not sure if to keep this command to a fixed buffer size, or continue
+// to use the ctx->buffer_used bits... if we keep the buffer_used stuff caller can
+// loop without memmove'ing the buffer?
+int mcmc_parse_buf(void *c, char *buf, size_t read, mcmc_resp_t *r) {
     mcmc_ctx_t *ctx = c;
     char *el;
+    ctx->buffer_used += read;
 
-    el = memchr(buf, '\n', len);
+    el = memchr(buf, '\n', ctx->buffer_used);
     if (el == NULL) {
         return MCMC_WANT_READ;
     }
@@ -616,6 +627,26 @@ void mcmc_get_error(void *c, char *code, size_t clen, char *msg, size_t mlen) {
     msg[0] = '\0';
 }
 
+int mcmc_read_value_buf(void *c, char *val, const size_t vsize, int *read) {
+    mcmc_ctx_t *ctx = (mcmc_ctx_t *)c;
+
+    // If the distance between tail/head is smaller than what we read into the
+    // main buffer, we have some value to copy out.
+    int leftover = ctx->buffer_used - (ctx->buffer_tail - ctx->buffer_head);
+    if (leftover > 0) {
+        int tocopy = leftover > vsize ? vsize : leftover;
+        memcpy(val + *read, ctx->buffer_tail, tocopy);
+        ctx->buffer_tail += tocopy;
+        *read += tocopy;
+        if (leftover > tocopy) {
+            // FIXME: think we need a specific code for "value didn't fit"
+            return MCMC_WANT_READ;
+        }
+    }
+
+    return MCMC_OK;
+}
+
 // read into the buffer, up to a max size of vsize.
 // will read (vsize-read) into the buffer pointed to by (val+read).
 // you are able to stream the value into different buffers, or process the
@@ -648,6 +679,7 @@ int mcmc_read_value(void *c, char *val, const size_t vsize, int *read) {
         // TODO: some internal disconnect work?
         return MCMC_NOT_CONNECTED;
     }
+    // FIXME: EAGAIN || EWOULDBLOCK!
     if (r == -1) {
         return MCMC_ERR;
     }
