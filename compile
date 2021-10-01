@@ -1,2 +1,0 @@
-#!/bin/bash
-gcc -g -Wall -Werror -pedantic -o example example.c mcmc.c
