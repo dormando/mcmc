@@ -7,3 +7,7 @@ all:
 
 clean:
 	rm -f example mcmc.o
+
+dist: clean
+
+distdir:
