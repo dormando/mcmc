@@ -38,7 +38,6 @@ typedef struct mcmc_ctx {
     int gai_status; // getaddrinfo() last status.
     int last_sys_error; // last syscall error (connect/etc?)
     int sent_bytes_partial; // note for partially sent buffers.
-    int request_queue; // supposed outstanding replies.
     int fail_code; // recent failure reason.
     int error; // latest error code.
     uint32_t status_flags; // internal only flags.
@@ -531,7 +530,6 @@ int mcmc_send_request(void *c, const char *request, int len, int count) {
         ctx->sent_bytes_partial += sent;
         return MCMC_WANT_WRITE;
     } else {
-        ctx->request_queue += count;
         ctx->sent_bytes_partial = 0;
     }
 
@@ -562,10 +560,6 @@ int mcmc_request_writev(void *c, const struct iovec *iov, int iovcnt, ssize_t *s
     if (*sent < tosend) {
         // can happen anytime, but mostly in nonblocking mode.
         return MCMC_WANT_WRITE;
-    } else {
-        // FIXME: user has to keep submitting the same count value...
-        // should decide on whether or not to give up on this.
-        ctx->request_queue += count;
     }
 
     return MCMC_OK;
@@ -707,10 +701,8 @@ char *mcmc_buffer_consume(void *c, int *remain) {
     int used = ctx->buffer_used;
     char *newbuf = ctx->buffer_tail;
 
-    // FIXME: request_queue-- is in the wrong place.
     // TODO: which of these _must_ be reset between requests? I think very
     // little?
-    ctx->request_queue--;
     ctx->status_flags = 0;
     ctx->buffer_head = NULL;
     ctx->buffer_tail = NULL;
