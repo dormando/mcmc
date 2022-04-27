@@ -48,14 +48,11 @@ typedef struct mcmc_ctx {
     size_t buffer_request_len; // cached endpoint for current request
     char *buffer_head; // buffer pointer currently in use.
     char *buffer_tail; // consumed tail of the buffer.
-
-    // request response detail.
-    mcmc_resp_t *resp;
 } mcmc_ctx_t;
 
 // INTERNAL FUNCTIONS
 
-static int _mcmc_parse_value_line(mcmc_ctx_t *ctx) {
+static int _mcmc_parse_value_line(mcmc_ctx_t *ctx, mcmc_resp_t *r) {
     char *buf = ctx->buffer_head;
     // we know that "VALUE " has matched, so skip that.
     char *p = buf+6;
@@ -103,7 +100,6 @@ static int _mcmc_parse_value_line(mcmc_ctx_t *ctx) {
 
     // If we made it this far, we've parsed everything, stuff the details into
     // the context for fetching later.
-    mcmc_resp_t *r = ctx->resp;
     // FIXME: set to NULL if we don't have the value?
     r->value = ctx->buffer_tail;
     r->vlen = bytes + 2; // add in the \r\n
@@ -130,13 +126,12 @@ static int _mcmc_parse_value_line(mcmc_ctx_t *ctx) {
 // FIXME: This is broken for ASCII multiget.
 // if we get VALUE back, we need to stay in ASCII GET read mode until an END
 // is seen.
-static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
+static int _mcmc_parse_response(mcmc_ctx_t *ctx, mcmc_resp_t *r) {
     char *buf = ctx->buffer_head;
     char *cur = buf;
     size_t l = ctx->buffer_request_len;
     int rlen; // response code length.
     int more = 0;
-    mcmc_resp_t *r = ctx->resp;
     r->reslen = ctx->buffer_request_len;
     r->type = MCMC_RESP_GENERIC;
 
@@ -281,7 +276,7 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx) {
             if (memcmp(buf, "VALUE", 5) == 0) {
                 if (more) {
                     // <key> <flags> <bytes> [<cas unique>]
-                    rv = _mcmc_parse_value_line(ctx);
+                    rv = _mcmc_parse_value_line(ctx, r);
                 } else {
                     rv = MCMC_ERR; // FIXME: parse error.
                 }
@@ -376,7 +371,7 @@ int mcmc_parse_buf(void *c, char *buf, size_t read, mcmc_resp_t *r) {
 
     // Consume through the newline.
     // buffer_tail now points to where value could start.
-    // FIXME: ctx->value ?
+    // FIXME: ctx->value ? (r->value?)
     ctx->buffer_tail = el+1;
 
     // FIXME: the server must be stricter in what it sends back. should always
@@ -388,8 +383,7 @@ int mcmc_parse_buf(void *c, char *buf, size_t read, mcmc_resp_t *r) {
 
     // We have a result line. Now pass it through the parser.
     // Then we indicate to the user that a response is ready.
-    ctx->resp = r;
-    return _mcmc_parse_response(ctx);
+    return _mcmc_parse_response(ctx, r);
 }
 
 /*** Functions wrapping syscalls **/
@@ -565,7 +559,6 @@ int mcmc_request_writev(void *c, const struct iovec *iov, int iovcnt, ssize_t *s
     return MCMC_OK;
 }
 
-// TODO: avoid recv if we have bytes in the buffer.
 int mcmc_read(void *c, char *buf, size_t bufsize, mcmc_resp_t *r) {
     mcmc_ctx_t *ctx = (mcmc_ctx_t *)c;
     char *el;
@@ -620,8 +613,7 @@ parse:
 
     // We have a result line. Now pass it through the parser.
     // Then we indicate to the user that a response is ready.
-    ctx->resp = r;
-    return _mcmc_parse_response(ctx);
+    return _mcmc_parse_response(ctx, r);
 }
 
 void mcmc_get_error(void *c, char *code, size_t clen, char *msg, size_t mlen) {
