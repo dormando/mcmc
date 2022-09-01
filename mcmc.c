@@ -112,7 +112,7 @@ static int _mcmc_parse_value_line(mcmc_ctx_t *ctx, mcmc_resp_t *r) {
     // NOTE: if value_offset < buffer_used, has part of the value in the
     // buffer already.
 
-    return MCMC_OK;
+    return MCMC_CODE_OK;
 }
 
 // FIXME: This is broken for ASCII multiget.
