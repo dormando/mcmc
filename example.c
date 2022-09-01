@@ -26,7 +26,7 @@ static void show_response_buffer(void *c, char *rbuf, size_t bufsize) {
         status = mcmc_parse_buf(c, rbuf, bread, &resp);
     } while (status == MCMC_WANT_READ);
 
-    if (status != MCMC_OK) {
+    if (status < MCMC_OK) {
         printf("bad response\n");
     }
 
