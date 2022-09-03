@@ -6,6 +6,7 @@ struct mc_valid {
     void *ctx;
     mcmc_resp_t r;
     short res;
+    short code;
     char buf[MAX+1];
 };
 
@@ -21,39 +22,40 @@ UTEST_F_TEARDOWN(mc_valid) {
     free(utest_fixture->ctx);
 }
 
-#define N(d, b, c) \
+#define N(d, b, c, r) \
     UTEST_F(mc_valid, d) { \
     do { \
         strncpy(utest_fixture->buf, b, MAX); \
-        utest_fixture->res = c; \
+        utest_fixture->res = r; \
+        utest_fixture->code = c; \
     } while (0); \
     }
 
 // check that responses match their codes
-N(metaend, "EN\r\n", MCMC_CODE_END)
-N(metaexists, "EX\r\n", MCMC_CODE_EXISTS)
-N(metaok, "HD\r\n", MCMC_CODE_OK)
-N(metanop, "MN\r\n", MCMC_CODE_NOP)
+N(metaend, "EN\r\n", MCMC_CODE_END, MCMC_OK)
+N(metaexists, "EX\r\n", MCMC_CODE_EXISTS, MCMC_OK)
+N(metaok, "HD\r\n", MCMC_CODE_OK, MCMC_OK)
+N(metanop, "MN\r\n", MCMC_CODE_NOP, MCMC_OK)
 //N(metadebug, "ME\r\n", MCMC_CODE_OK) // FIXME: needs code/type
-N(metanotfound, "NF\r\n", MCMC_CODE_NOT_FOUND)
-N(metanotstored, "NS\r\n", MCMC_CODE_NOT_STORED)
-N(metavalue, "VA 2 t\r\nhi\r\n", MCMC_CODE_OK) // FIXME: does this make sense?
-N(metavalue2, "VA 2\r\nho\r\n", MCMC_CODE_OK)
-N(generic, "OK\r\n", MCMC_CODE_OK)
-N(end, "END\r\n", MCMC_CODE_END)
+N(metanotfound, "NF\r\n", MCMC_CODE_NOT_FOUND, MCMC_OK)
+N(metanotstored, "NS\r\n", MCMC_CODE_NOT_STORED, MCMC_OK)
+N(metavalue, "VA 2 t\r\nhi\r\n", MCMC_CODE_OK, MCMC_OK) // FIXME: does this make sense?
+N(metavalue2, "VA 2\r\nho\r\n", MCMC_CODE_OK, MCMC_OK)
+N(generic, "OK\r\n", MCMC_CODE_OK, MCMC_OK)
+N(end, "END\r\n", MCMC_CODE_END, MCMC_OK)
 //N(stat, "STAT\r\n", MCMC_CODE_STAT) // FIXME: unfinished
-N(value, "VALUE key 0 2\r\nhi\r\n", MCMC_CODE_OK)
-N(valuecas, "VALUE key 0 2 5\r\nhi\r\n", MCMC_CODE_OK)
-N(stored, "STORED\r\n", MCMC_CODE_STORED)
-N(exists, "EXISTS\r\n", MCMC_CODE_EXISTS)
-N(deleted, "DELETED\r\n", MCMC_CODE_DELETED)
-N(touched, "TOUCHED\r\n", MCMC_CODE_TOUCHED)
-N(version, "VERSION 1.1.1\r\n", MCMC_CODE_VERSION)
-N(notfound, "NOT_FOUND\r\n", MCMC_CODE_NOT_FOUND)
-N(notstored, "NOT_STORED\r\n", MCMC_CODE_NOT_STORED)
+N(value, "VALUE key 0 2\r\nhi\r\n", MCMC_CODE_OK, MCMC_OK)
+N(valuecas, "VALUE key 0 2 5\r\nhi\r\n", MCMC_CODE_OK, MCMC_OK)
+N(stored, "STORED\r\n", MCMC_CODE_STORED, MCMC_OK)
+N(exists, "EXISTS\r\n", MCMC_CODE_EXISTS, MCMC_OK)
+N(deleted, "DELETED\r\n", MCMC_CODE_DELETED, MCMC_OK)
+N(touched, "TOUCHED\r\n", MCMC_CODE_TOUCHED, MCMC_OK)
+N(version, "VERSION 1.1.1\r\n", MCMC_CODE_VERSION, MCMC_OK)
+N(notfound, "NOT_FOUND\r\n", MCMC_CODE_NOT_FOUND, MCMC_OK)
+N(notstored, "NOT_STORED\r\n", MCMC_CODE_NOT_STORED, MCMC_OK)
 
 // check some error conditions
-N(shortres, "S\r\n", -MCMC_ERR_SHORT)
+N(shortres, "S\r\n", MCMC_ERR_SHORT, MCMC_ERR)
 
 #undef N
 

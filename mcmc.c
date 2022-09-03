@@ -144,11 +144,13 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx, mcmc_resp_t *r) {
         // TODO: parse it as a number on request.
         // TODO: validate whole thing as digits here?
         r->type = MCMC_RESP_NUMERIC;
+        r->code = MCMC_CODE_OK;
         return MCMC_OK;
     }
 
     if (rlen < 2) {
-        return -MCMC_ERR_SHORT;
+        r->code = MCMC_ERR_SHORT;
+        return MCMC_ERR;
     }
 
     int code = MCMC_ERR;
@@ -302,8 +304,13 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx, mcmc_resp_t *r) {
             break;
     }
 
-    r->code = code;
-    return code;
+    if (code < MCMC_OK) {
+        r->code = -code;
+        return MCMC_ERR;
+    } else {
+        r->code = code;
+        return MCMC_OK;
+    }
 }
 
 // EXTERNAL API
@@ -334,12 +341,12 @@ int mcmc_parse_buf(void *c, char *buf, size_t read, mcmc_resp_t *r) {
     mcmc_ctx_t *ctx = c;
     char *el;
 
+    memset(r, 0, sizeof(*r));
     el = memchr(buf, '\n', read);
     if (el == NULL) {
-        return MCMC_WANT_READ;
+        r->code = MCMC_WANT_READ;
+        return MCMC_ERR;
     }
-
-    memset(r, 0, sizeof(*r));
 
     // Consume through the newline, note where the value would start if exists
     r->value = el+1;

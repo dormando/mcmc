@@ -28,7 +28,6 @@
 #define MCMC_ERR_PARSE 19
 #define MCMC_ERR_VALUE 20
 
-
 // response types
 #define MCMC_RESP_GET 100
 #define MCMC_RESP_META 101
