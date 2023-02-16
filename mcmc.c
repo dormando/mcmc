@@ -115,6 +115,33 @@ static int _mcmc_parse_value_line(mcmc_ctx_t *ctx, mcmc_resp_t *r) {
     return MCMC_CODE_OK;
 }
 
+static int _mcmc_parse_stat_line(mcmc_ctx_t *ctx, mcmc_resp_t *r) {
+    char *buf = ctx->buffer_head;
+    char *p = buf+5; // pass "STAT "
+    size_t l = ctx->buffer_request_len;
+
+    // STAT key value
+    char *sname = p;
+    p = memchr(p, ' ', l-5);
+    if (p == NULL) {
+        return -MCMC_ERR_VALUE;
+    }
+
+    int snamelen = p - sname;
+    while (*p == ' ') {
+        p++;
+    }
+    char *stat = p;
+    int statlen = l - (p - ctx->buffer_head) - 2;
+
+    r->sname = sname;
+    r->snamelen = snamelen;
+    r->stat = stat;
+    r->statlen = statlen;
+
+    return MCMC_CODE_OK;
+}
+
 // FIXME: This is broken for ASCII multiget.
 // if we get VALUE back, we need to stay in ASCII GET read mode until an END
 // is seen.
@@ -257,7 +284,7 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx, mcmc_resp_t *r) {
             if (memcmp(buf, "STAT", 4) == 0) {
                 r->type = MCMC_RESP_STAT;
                 ctx->state = STATE_STAT_RESP;
-                // TODO: initialize stat reader mode.
+                code = _mcmc_parse_stat_line(ctx, r);
             }
             break;
         case 5:

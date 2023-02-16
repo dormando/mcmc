@@ -69,8 +69,10 @@ typedef struct {
         };
         // STAT response
         struct {
+            char *sname;
+            size_t snamelen;
             char *stat;
-            size_t slen;
+            size_t statlen;
         };
     };
 } mcmc_resp_t;
