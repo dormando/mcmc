@@ -152,7 +152,7 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx, mcmc_resp_t *r) {
     int rlen; // response code length.
     int more = 0;
     r->reslen = ctx->buffer_request_len;
-    r->type = MCMC_RESP_GENERIC;
+    r->type = MCMC_RESP_FAIL;
 
     // walk until the \r\n
     while (l-- > 2) {
@@ -240,6 +240,7 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx, mcmc_resp_t *r) {
                         char *n = NULL;
                         uint32_t vsize = strtoul(cur, &n, 10);
                         if ((errno == ERANGE) || (cur == n)) {
+                            r->type = MCMC_RESP_FAIL;
                             code = -MCMC_ERR_PARSE;
                         } else {
                             r->vlen = vsize + 2; // tag in the \r\n.
@@ -257,6 +258,7 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx, mcmc_resp_t *r) {
                             code = MCMC_CODE_OK;
                         }
                     } else {
+                        r->type = MCMC_RESP_FAIL;
                         code = -MCMC_ERR_PARSE;
                     }
                 }
@@ -295,20 +297,27 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx, mcmc_resp_t *r) {
                 } else {
                     code = -MCMC_ERR_PARSE;
                 }
+            } else if (memcmp(buf, "ERROR", 5) == 0) {
+                r->type = MCMC_RESP_ERRMSG;
+                code = -MCMC_CODE_ERROR;
             }
             break;
         case 6:
             if (memcmp(buf, "STORED", 6) == 0) {
+                r->type = MCMC_RESP_GENERIC;
                 code = MCMC_CODE_STORED;
             } else if (memcmp(buf, "EXISTS", 6) == 0) {
+                r->type = MCMC_RESP_GENERIC;
                 code = MCMC_CODE_EXISTS;
                 // TODO: type -> ASCII?
             }
             break;
         case 7:
             if (memcmp(buf, "DELETED", 7) == 0) {
+                r->type = MCMC_RESP_GENERIC;
                 code = MCMC_CODE_DELETED;
             } else if (memcmp(buf, "TOUCHED", 7) == 0) {
+                r->type = MCMC_RESP_GENERIC;
                 code = MCMC_CODE_TOUCHED;
             } else if (memcmp(buf, "VERSION", 7) == 0) {
                 code = MCMC_CODE_VERSION;
@@ -318,16 +327,25 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx, mcmc_resp_t *r) {
             break;
         case 9:
             if (memcmp(buf, "NOT_FOUND", 9) == 0) {
+                r->type = MCMC_RESP_GENERIC;
                 code = MCMC_CODE_NOT_FOUND;
             }
             break;
         case 10:
             if (memcmp(buf, "NOT_STORED", 10) == 0) {
+                r->type = MCMC_RESP_GENERIC;
                 code = MCMC_CODE_NOT_STORED;
             }
             break;
         default:
             // Unknown code, assume error.
+            if (memcmp(buf, "SERVER_ERROR", 12) == 0) {
+                r->type = MCMC_RESP_ERRMSG;
+                code = -MCMC_CODE_SERVER_ERROR;
+            } else if (memcmp(buf, "CLIENT_ERROR", 12) == 0) {
+                r->type = MCMC_RESP_ERRMSG;
+                code = -MCMC_CODE_CLIENT_ERROR;
+            }
             break;
     }
 
