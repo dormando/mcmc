@@ -34,26 +34,21 @@
 typedef struct mcmc_ctx {
     int fd;
     int gai_status; // getaddrinfo() last status.
-    int last_sys_error; // last syscall error (connect/etc?)
     int sent_bytes_partial; // note for partially sent buffers.
-    int fail_code; // recent failure reason.
     int error; // latest error code.
     uint32_t status_flags; // internal only flags.
-    int state;
 
     // FIXME: s/buffer_used/buffer_filled/ ?
     size_t buffer_used; // amount of bytes read into the buffer so far.
-    size_t buffer_request_len; // cached endpoint for current request
     char *buffer_head; // buffer pointer currently in use.
 } mcmc_ctx_t;
 
 // INTERNAL FUNCTIONS
 
-static int _mcmc_parse_value_line(mcmc_ctx_t *ctx, mcmc_resp_t *r) {
-    char *buf = ctx->buffer_head;
+static int _mcmc_parse_value_line(char *buf, size_t read, mcmc_resp_t *r) {
     // we know that "VALUE " has matched, so skip that.
     char *p = buf+6;
-    size_t l = ctx->buffer_request_len;
+    size_t l = r->reslen;
 
     // <key> <flags> <bytes> [<cas unique>]
     char *key = p;
@@ -96,7 +91,7 @@ static int _mcmc_parse_value_line(mcmc_ctx_t *ctx, mcmc_resp_t *r) {
     // If we made it this far, we've parsed everything, stuff the details into
     // the context for fetching later.
     r->vlen = bytes + 2; // add in the \r\n
-    int buffer_remain = ctx->buffer_used - (r->value - ctx->buffer_head);
+    int buffer_remain = read - r->reslen;
     if (buffer_remain >= r->vlen) {
         r->vlen_read = r->vlen;
     } else {
@@ -107,18 +102,16 @@ static int _mcmc_parse_value_line(mcmc_ctx_t *ctx, mcmc_resp_t *r) {
     r->flags = flags;
     r->cas = cas;
     r->type = MCMC_RESP_GET;
-    ctx->state = STATE_GET_RESP;
 
-    // NOTE: if value_offset < buffer_used, has part of the value in the
+    // NOTE: if value_offset < read, has part of the value in the
     // buffer already.
 
     return MCMC_CODE_OK;
 }
 
-static int _mcmc_parse_stat_line(mcmc_ctx_t *ctx, mcmc_resp_t *r) {
-    char *buf = ctx->buffer_head;
+static int _mcmc_parse_stat_line(char *buf, mcmc_resp_t *r) {
     char *p = buf+5; // pass "STAT "
-    size_t l = ctx->buffer_request_len;
+    size_t l = r->reslen;
 
     // STAT key value
     char *sname = p;
@@ -132,7 +125,7 @@ static int _mcmc_parse_stat_line(mcmc_ctx_t *ctx, mcmc_resp_t *r) {
         p++;
     }
     char *stat = p;
-    int statlen = l - (p - ctx->buffer_head) - 2;
+    int statlen = l - (p - buf) - 2;
 
     r->sname = sname;
     r->snamelen = snamelen;
@@ -145,13 +138,11 @@ static int _mcmc_parse_stat_line(mcmc_ctx_t *ctx, mcmc_resp_t *r) {
 // FIXME: This is broken for ASCII multiget.
 // if we get VALUE back, we need to stay in ASCII GET read mode until an END
 // is seen.
-static int _mcmc_parse_response(mcmc_ctx_t *ctx, mcmc_resp_t *r) {
-    char *buf = ctx->buffer_head;
+static int _mcmc_parse_response(char *buf, size_t read, mcmc_resp_t *r) {
     char *cur = buf;
-    size_t l = ctx->buffer_request_len;
+    size_t l = r->reslen;
     int rlen; // response code length.
     int more = 0;
-    r->reslen = ctx->buffer_request_len;
     r->type = MCMC_RESP_FAIL;
 
     // walk until the \r\n
@@ -245,7 +236,7 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx, mcmc_resp_t *r) {
                         } else {
                             r->vlen = vsize + 2; // tag in the \r\n.
                             // FIXME: macro.
-                            int buffer_remain = ctx->buffer_used - (r->value - ctx->buffer_head);
+                            int buffer_remain = read - r->reslen;
                             if (buffer_remain >= r->vlen) {
                                 r->vlen_read = r->vlen;
                             } else {
@@ -277,7 +268,6 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx, mcmc_resp_t *r) {
         case 3:
             if (memcmp(buf, "END", 3) == 0) {
                 // Either end of STAT results, or end of ascii GET key list.
-                ctx->state = STATE_DEFAULT;
                 code = MCMC_CODE_END;
                 r->type = MCMC_RESP_END;
             }
@@ -285,15 +275,14 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx, mcmc_resp_t *r) {
         case 4:
             if (memcmp(buf, "STAT", 4) == 0) {
                 r->type = MCMC_RESP_STAT;
-                ctx->state = STATE_STAT_RESP;
-                code = _mcmc_parse_stat_line(ctx, r);
+                code = _mcmc_parse_stat_line(buf, r);
             }
             break;
         case 5:
             if (memcmp(buf, "VALUE", 5) == 0) {
                 if (more) {
                     // <key> <flags> <bytes> [<cas unique>]
-                    code = _mcmc_parse_value_line(ctx, r);
+                    code = _mcmc_parse_value_line(buf, read, r);
                 } else {
                     code = -MCMC_ERR_PARSE;
                 }
@@ -358,7 +347,34 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx, mcmc_resp_t *r) {
     }
 }
 
-// EXTERNAL API
+// END INTERNAL FUNCTIONS
+
+// Context-less bare API.
+
+// Directly parse a buffer with read data of size len.
+// r->reslen + r->vlen_read is the bytes consumed from the buffer read.
+// Caller manages how to retry if MCMC_WANT_READ or an error happens.
+int mcmc_parse_buf(char *buf, size_t read, mcmc_resp_t *r) {
+    char *el;
+
+    memset(r, 0, sizeof(*r));
+    el = memchr(buf, '\n', read);
+    if (el == NULL) {
+        r->code = MCMC_WANT_READ;
+        return MCMC_ERR;
+    }
+
+    // Consume through the newline, note where the value would start if exists
+    r->value = el+1;
+    r->reslen = r->value - buf;
+
+    // FIXME: the server must be stricter in what it sends back. should always
+    // have a \r. check for it and fail?
+
+    return _mcmc_parse_response(buf, read, r);
+}
+
+// Context-ful API.
 
 int mcmc_fd(void *c) {
     mcmc_ctx_t *ctx = (mcmc_ctx_t *)c;
@@ -374,41 +390,6 @@ size_t mcmc_size(int options) {
 // but this is probably more convenient for the caller if it's less dynamic.
 size_t mcmc_min_buffer_size(int options) {
     return MIN_BUFFER_SIZE;
-}
-
-// Directly parse a buffer with read data of size len.
-// r->reslen + r->vlen_read is the bytes consumed from the buffer read.
-// Caller manages how to retry if MCMC_WANT_READ or an error happens.
-// FIXME: not sure if to keep this command to a fixed buffer size, or continue
-// to use the ctx->buffer_used bits... if we keep the buffer_used stuff caller can
-// loop without memmove'ing the buffer?
-int mcmc_parse_buf(void *c, char *buf, size_t read, mcmc_resp_t *r) {
-    mcmc_ctx_t *ctx = c;
-    char *el;
-
-    memset(r, 0, sizeof(*r));
-    el = memchr(buf, '\n', read);
-    if (el == NULL) {
-        r->code = MCMC_WANT_READ;
-        return MCMC_ERR;
-    }
-
-    // Consume through the newline, note where the value would start if exists
-    r->value = el+1;
-
-    ctx->buffer_used = read;
-    // FIXME: the server must be stricter in what it sends back. should always
-    // have a \r. check for it and fail?
-    ctx->buffer_request_len = r->value - buf;
-    // leave the \r\n in the line end cache.
-    ctx->buffer_head = buf;
-
-    return _mcmc_parse_response(ctx, r);
-}
-
-int mcmc_bare_parse_buf(char *buf, size_t read, mcmc_resp_t *r) {
-    mcmc_ctx_t ctx;
-    return mcmc_parse_buf(&ctx, buf, read, r);
 }
 
 /*** Functions wrapping syscalls **/

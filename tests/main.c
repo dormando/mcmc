@@ -3,7 +3,6 @@
 
 #define MAX 1024
 struct mc_valid {
-    void *ctx;
     mcmc_resp_t r;
     short type;
     short res;
@@ -12,17 +11,14 @@ struct mc_valid {
 };
 
 UTEST_F_SETUP(mc_valid) {
-    utest_fixture->ctx = calloc(1, mcmc_size(MCMC_OPTION_BLANK));
-    ASSERT_TRUE(utest_fixture->ctx);
 }
 
 UTEST_F_TEARDOWN(mc_valid) {
-    int res = mcmc_parse_buf(utest_fixture->ctx, utest_fixture->buf,
+    int res = mcmc_parse_buf(utest_fixture->buf,
             strlen(utest_fixture->buf), &utest_fixture->r);
     ASSERT_EQ(res, utest_fixture->res);
     ASSERT_EQ(utest_fixture->r.code, utest_fixture->code);
     ASSERT_EQ(utest_fixture->r.type, utest_fixture->type);
-    free(utest_fixture->ctx);
 }
 
 #define N(d, b, t, c, r) \
