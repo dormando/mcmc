@@ -155,12 +155,13 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx, mcmc_resp_t *r) {
     r->type = MCMC_RESP_FAIL;
 
     // walk until the \r\n
-    while (l-- > 2) {
+    while (l > 2) {
         if (*cur == ' ') {
             more = 1;
             break;
         }
         cur++;
+        l--;
     }
     rlen = cur - buf;
 
@@ -251,6 +252,8 @@ static int _mcmc_parse_response(mcmc_ctx_t *ctx, mcmc_resp_t *r) {
                             } else {
                                 r->vlen_read = buffer_remain;
                             }
+                            // account for trimmed vsize length and leading spaces
+                            l -= n - cur;
                             cur = n;
                             if (*cur != ' ') {
                                 more = 0;
