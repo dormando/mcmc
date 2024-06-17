@@ -51,7 +51,7 @@
 #define MCMC_ERROR_CODE_MAX 32
 #define MCMC_ERROR_MSG_MAX 512
 
-typedef struct {
+typedef struct mcmc_resp_s {
     short type;
     short code;
     char *value; // pointer to start of value in buffer.
