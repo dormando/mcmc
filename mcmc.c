@@ -45,13 +45,13 @@ typedef struct mcmc_ctx {
 
 // INTERNAL FUNCTIONS
 
-static int _mcmc_parse_value_line(char *buf, size_t read, mcmc_resp_t *r) {
+static int _mcmc_parse_value_line(const char *buf, size_t read, mcmc_resp_t *r) {
     // we know that "VALUE " has matched, so skip that.
-    char *p = buf+6;
+    const char *p = buf+6;
     size_t l = r->reslen;
 
     // <key> <flags> <bytes> [<cas unique>]
-    char *key = p;
+    const char *key = p;
     int keylen;
     p = memchr(p, ' ', l - 6);
     if (p == NULL) {
@@ -109,12 +109,12 @@ static int _mcmc_parse_value_line(char *buf, size_t read, mcmc_resp_t *r) {
     return MCMC_CODE_OK;
 }
 
-static int _mcmc_parse_stat_line(char *buf, mcmc_resp_t *r) {
-    char *p = buf+5; // pass "STAT "
+static int _mcmc_parse_stat_line(const char *buf, mcmc_resp_t *r) {
+    const char *p = buf+5; // pass "STAT "
     size_t l = r->reslen;
 
     // STAT key value
-    char *sname = p;
+    const char *sname = p;
     p = memchr(p, ' ', l-5);
     if (p == NULL) {
         return -MCMC_ERR_VALUE;
@@ -124,7 +124,7 @@ static int _mcmc_parse_stat_line(char *buf, mcmc_resp_t *r) {
     while (*p == ' ') {
         p++;
     }
-    char *stat = p;
+    const char *stat = p;
     int statlen = l - (p - buf) - 2;
 
     r->sname = sname;
@@ -138,15 +138,15 @@ static int _mcmc_parse_stat_line(char *buf, mcmc_resp_t *r) {
 // FIXME: This is broken for ASCII multiget.
 // if we get VALUE back, we need to stay in ASCII GET read mode until an END
 // is seen.
-static int _mcmc_parse_response(char *buf, size_t read, mcmc_resp_t *r) {
-    char *cur = buf;
-    size_t l = r->reslen;
+static int _mcmc_parse_response(const char *buf, size_t read, mcmc_resp_t *r) {
+    const char *cur = buf;
     int rlen; // response code length.
     int more = 0;
     r->type = MCMC_RESP_FAIL;
 
     // walk until the \r\n
-    while (l-- > 2) {
+    // we can't enter this function without there being a '\n' in the buffer.
+    while (*cur != '\r' && *cur != '\n') {
         if (*cur == ' ') {
             more = 1;
             break;
@@ -258,8 +258,18 @@ static int _mcmc_parse_response(char *buf, size_t read, mcmc_resp_t *r) {
             // maybe: if !rv and !fail, do something special?
             // if (more), there are flags. shove them in the right place.
             if (more) {
-                r->rline = cur+1; // eat the space.
-                r->rlen = l-1;
+                // walk until not space
+                while (*cur == ' ') {
+                    cur++;
+                }
+                r->rline = cur;
+                r->rlen = r->reslen - (cur - buf);
+                // cut \n or \r\n
+                if (buf[r->reslen-2] == '\r') {
+                    r->rlen -= 2;
+                } else {
+                    r->rlen--;
+                }
             } else {
                 r->rline = NULL;
                 r->rlen = 0;
@@ -354,7 +364,7 @@ static int _mcmc_parse_response(char *buf, size_t read, mcmc_resp_t *r) {
 // Directly parse a buffer with read data of size len.
 // r->reslen + r->vlen_read is the bytes consumed from the buffer read.
 // Caller manages how to retry if MCMC_WANT_READ or an error happens.
-int mcmc_parse_buf(char *buf, size_t read, mcmc_resp_t *r) {
+int mcmc_parse_buf(const char *buf, size_t read, mcmc_resp_t *r) {
     char *el;
 
     memset(r, 0, sizeof(*r));

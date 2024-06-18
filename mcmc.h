@@ -61,12 +61,12 @@ typedef struct mcmc_resp_s {
     union {
         // META response
         struct {
-            char *rline; // start of meta response line.
+            const char *rline; // start of meta response line.
             size_t rlen;
         };
         // GET response
         struct {
-            char *key;
+            const char *key;
             size_t klen;
             uint32_t flags;
             uint64_t cas;
@@ -74,9 +74,9 @@ typedef struct mcmc_resp_s {
         };
         // STAT response
         struct {
-            char *sname;
+            const char *sname;
             size_t snamelen;
-            char *stat;
+            const char *stat;
             size_t statlen;
         };
     };
@@ -85,7 +85,7 @@ typedef struct mcmc_resp_s {
 int mcmc_fd(void *c);
 size_t mcmc_size(int options);
 size_t mcmc_min_buffer_size(int options);
-int mcmc_parse_buf(char *buf, size_t read, mcmc_resp_t *r);
+int mcmc_parse_buf(const char *buf, size_t read, mcmc_resp_t *r);
 int mcmc_connect(void *c, char *host, char *port, int options);
 int mcmc_check_nonblock_connect(void *c, int *err);
 int mcmc_send_request(void *c, const char *request, int len, int count);
