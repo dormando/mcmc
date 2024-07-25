@@ -110,4 +110,99 @@ UTEST(metaresp, space) {
 // - check too many / too few tokens
 // - check key of all lengths
 
+struct mc_toktou32 {
+    const char *tok;
+    size_t tlen;
+    int res;
+    uint32_t out;
+};
+UTEST_F_SETUP(mc_toktou32) {
+}
+UTEST_F_TEARDOWN(mc_toktou32) {
+    uint32_t out = 0;
+    int res = mcmc_toktou32(utest_fixture->tok,
+            utest_fixture->tlen, &out);
+    ASSERT_EQ(res, utest_fixture->res);
+    ASSERT_EQ(out, utest_fixture->out);
+}
+
+#define M(d, t, tl, r, o) \
+    UTEST_F(mc_toktou32, d) { \
+        if (tl == -1) { \
+            utest_fixture->tlen = strlen(t); \
+        } else { \
+            utest_fixture->tlen = tl; \
+        } \
+        utest_fixture->tok = t; \
+        utest_fixture->res = r; \
+        utest_fixture->out = o; \
+    }
+
+M(toolong, "9876", 5000, -2, 0)
+M(neglen, "5678", -2, -2, 0)
+M(small, "1234", 3, 0, 123)
+M(junk, "asdf", -1, -3, 0)
+M(midjunk, "1234foo5678", -1, -3, 0)
+M(neg, "-5", -1, -3, 0)
+M(oneover, "4294967296", -1, -1, 0)
+M(max, "4294967295", -1, 0, 4294967295)
+M(overflow, "99999999999", -1, -1, 0)
+M(five, "5", 1, 0, 5)
+M(zero, "0", 1, 0, 0)
+M(manyzero, "00000", -1, 0, 0)
+M(series, "12345678", -1, 0, 12345678)
+
+#undef M
+
+struct mc_tokto32 {
+    const char *tok;
+    size_t tlen;
+    int res;
+    int32_t out;
+};
+UTEST_F_SETUP(mc_tokto32) {
+}
+UTEST_F_TEARDOWN(mc_tokto32) {
+    int32_t out = 0;
+    int res = mcmc_tokto32(utest_fixture->tok,
+            utest_fixture->tlen, &out);
+    ASSERT_EQ(res, utest_fixture->res);
+    ASSERT_EQ(out, utest_fixture->out);
+}
+
+#define M(d, t, tl, r, o) \
+    UTEST_F(mc_tokto32, d) { \
+        if (tl == -1) { \
+            utest_fixture->tlen = strlen(t); \
+        } else { \
+            utest_fixture->tlen = tl; \
+        } \
+        utest_fixture->tok = t; \
+        utest_fixture->res = r; \
+        utest_fixture->out = o; \
+    }
+
+M(toolong, "9876", 5000, -2, 0)
+M(neglen, "5678", -2, -2, 0)
+M(small, "1234", 3, 0, 123)
+M(junk, "asdf", -1, -3, 0)
+M(midjunk, "1234foo5678", -1, -3, 0)
+M(neg, "-5", -1, 0, -5)
+M(max, "2147483647", -1, 0, INT32_MAX)
+M(oneover, "2147483648", -1, -1, 0)
+M(min, "-2147483648", -1, 0, INT32_MIN)
+M(oneunder, "-2147483649", -1, -1, 0)
+M(overflow, "99999999999", -1, -1, 0)
+M(underflow, "-9999999999", -1, -1, 0)
+M(five, "5", 1, 0, 5)
+M(zero, "0", 1, 0, 0)
+M(manyzero, "00000", -1, 0, 0)
+M(series, "12345678", -1, 0, 12345678)
+
+#undef M
+
+// TODO:
+// mcmc_toktou64
+// mcmc_tokto64
+
 UTEST_MAIN()

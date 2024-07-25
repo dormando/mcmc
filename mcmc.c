@@ -45,6 +45,141 @@ typedef struct mcmc_ctx {
 
 // INTERNAL FUNCTIONS
 
+// FIXME: USHRT_MAX?
+#define TOKENIZER_MAXLEN (1<<16)-1
+
+// Find the starting offsets of each token; ignoring length.
+// This creates a fast small (<= cacheline) index into the request,
+// where we later scan or directly feed data into API's.
+__attribute__((unused)) static int _mcmc_tokenize(mcmc_tokenizer_t *t, const char *line, size_t len, const int max) {
+    // TODO: do we need to find the \r\n and remove that from len?
+    const char *s = line;
+
+    // since multigets can be huge, we can't purely judge reqlen against this
+    // limit, but we also can't index past it since the tokens are shorts.
+    if (len > TOKENIZER_MAXLEN) {
+        len = TOKENIZER_MAXLEN;
+    }
+    const char *end = s + len;
+    int curtoken = 0;
+
+    int state = 0;
+    while (s != end) {
+        switch (state) {
+            case 0:
+                // scanning for first non-space to find a token.
+                if (*s != ' ') {
+                    t->tokens[curtoken] = s - line;
+                    if (++curtoken == max) {
+                        s++;
+                        state = 2;
+                        break;
+                    }
+                    state = 1;
+                }
+                s++;
+                break;
+            case 1:
+                // advance over a token
+                if (*s != ' ') {
+                    s++;
+                } else {
+                    state = 0;
+                }
+                break;
+            case 2:
+                // hit max tokens before end of the line.
+                // keep advancing so we can place endcap token.
+                if (*s == ' ') {
+                    goto endloop;
+                }
+                s++;
+                break;
+        }
+    }
+endloop:
+
+    // endcap token so we can quickly find the length of any token by looking
+    // at the next one.
+    t->tokens[curtoken] = s - line;
+    t->ntokens = curtoken;
+
+    return 0;
+}
+
+// specialized tokenizer for meta protocol commands or responses, fills in the
+// bitflags while scanning.
+// FIXME: keep one function and set mstart to INTMAX if not meta?
+__attribute__((unused)) static int _mcmc_tokenize_meta(mcmc_tokenizer_t *t, const char *line, size_t len, const int mstart, const int max) {
+    // TODO: do we need to find the \r\n and remove that from len?
+    const char *s = line;
+
+    // since multigets can be huge, we can't purely judge reqlen against this
+    // limit, but we also can't index past it since the tokens are shorts.
+    if (len > TOKENIZER_MAXLEN) {
+        len = TOKENIZER_MAXLEN;
+    }
+    const char *end = s + len;
+    int curtoken = 0;
+
+    int state = 0;
+    while (s != end) {
+        switch (state) {
+            case 0:
+                // scanning for first non-space to find a token.
+                if (*s != ' ') {
+                    // FIXME: blow out if flag is out of range
+                    if (curtoken > mstart && *s > 64 && *s < 123) {
+                        t->metaflags |= (uint64_t)1 << (*s - 65);
+                    }
+                    t->tokens[curtoken] = s - line;
+                    if (++curtoken == max) {
+                        s++;
+                        state = 2;
+                        break;
+                    }
+                    state = 1;
+                }
+                s++;
+                break;
+            case 1:
+                // advance over a token
+                if (*s != ' ') {
+                    s++;
+                } else {
+                    state = 0;
+                }
+                break;
+            case 2:
+                // hit max tokens before end of the line.
+                // keep advancing so we can place endcap token.
+                if (*s == ' ') {
+                    goto endloop;
+                }
+                s++;
+                break;
+        }
+    }
+endloop:
+
+    // endcap token so we can quickly find the length of any token by looking
+    // at the next one.
+    t->tokens[curtoken] = s - line;
+    t->ntokens = curtoken;
+
+    return 0;
+}
+
+/*static int _process_token_len(mcp_parser_t *pr, size_t token) {
+    const char *s = pr->request + pr->tokens[token];
+    const char *e = pr->request + pr->tokens[token+1];
+    // start of next token is after any space delimiters, so back those out.
+    while (*(e-1) == ' ') {
+        e--;
+    }
+    return e - s;
+}*/
+
 static int _mcmc_parse_value_line(const char *buf, size_t read, mcmc_resp_t *r) {
     // we know that "VALUE " has matched, so skip that.
     const char *p = buf+6;
@@ -360,6 +495,139 @@ static int _mcmc_parse_response(const char *buf, size_t read, mcmc_resp_t *r) {
 // END INTERNAL FUNCTIONS
 
 // Context-less bare API.
+
+// TODO: possible to codegen the 32 vs 64 variants
+// easy with a macro I just hate how that looks
+#define MCMC_TOKTO32_MAX 11
+#define MCMC_TOKTO64_MAX 22
+
+// TODO: test if __builtin_add_overflow exists and use that instead for
+// hardware boost.
+// just need to split the mul and the add? if (__builtin_mul_overflow(etc))
+// - need a method to force compile both functions for the test suite.
+int mcmc_toktou32(const char *t, size_t len, uint32_t *out) {
+    uint32_t sum = 0;
+    const char *pos = t;
+    // We clamp the possible length to make input length errors less likely to
+    // go for a walk through memory.
+    if (len > MCMC_TOKTO32_MAX) {
+        return MCMC_TOKTO_ELONG;
+    }
+    while (len--) {
+        char num = pos[0] - '0';
+        if (num > -1 && num < 10) {
+            uint32_t lim = (UINT32_MAX - num) / 10;
+            if (sum > lim) {
+                return MCMC_TOKTO_ERANGE;
+            }
+            sum = sum * 10 + num;
+        } else {
+            return MCMC_TOKTO_EINVALID;
+        }
+        pos++;
+    }
+    *out = sum;
+    return 0;
+}
+
+int mcmc_toktou64(const char *t, size_t len, uint64_t *out) {
+    uint64_t sum = 0;
+    const char *pos = t;
+    if (len > MCMC_TOKTO64_MAX) {
+        return MCMC_TOKTO_ELONG;
+    }
+    while (len--) {
+        char num = pos[0] - '0';
+        if (num > -1 && num < 10) {
+            uint32_t lim = (UINT64_MAX - num) / 10;
+            if (sum > lim) {
+                return MCMC_TOKTO_ERANGE;
+            }
+            sum = sum * 10 + num;
+        } else {
+            return MCMC_TOKTO_EINVALID;
+        }
+        pos++;
+    }
+    *out = sum;
+    return 0;
+}
+
+int mcmc_tokto32(const char *t, size_t len, int32_t *out) {
+    int32_t sum = 0;
+    const char *pos = t;
+    int is_sig = 0;
+    if (len > MCMC_TOKTO32_MAX) {
+        return MCMC_TOKTO_ELONG;
+    }
+    // If we're negative the first character must be -
+    if (pos[0] == '-') {
+        len--;
+        pos++;
+        is_sig = 1;
+    }
+    while (len--) {
+        char num = pos[0] - '0';
+        if (num > -1 && num < 10) {
+            if (is_sig) {
+                int32_t lim = (INT32_MIN + num) / 10;
+                if (sum < lim) {
+                    return MCMC_TOKTO_ERANGE;
+                }
+                sum = sum * 10 - num;
+            } else {
+                int32_t lim = (INT32_MAX - num) / 10;
+                if (sum > lim) {
+                    return MCMC_TOKTO_ERANGE;
+                }
+                sum = sum * 10 + num;
+            }
+        } else {
+            return MCMC_TOKTO_EINVALID;
+        }
+        pos++;
+    }
+    *out = sum;
+    return 0;
+}
+
+int mcmc_tokto64(const char *t, size_t len, int64_t *out) {
+    int64_t sum = 0;
+    const char *pos = t;
+    int is_sig = 0;
+    if (len > MCMC_TOKTO64_MAX) {
+        return MCMC_TOKTO_ELONG;
+    }
+    // If we're negative the first character must be -
+    if (pos[0] == '-') {
+        len--;
+        pos++;
+        is_sig = 1;
+    }
+    while (len--) {
+        char num = pos[0] - '0';
+        if (num > -1 && num < 10) {
+            if (is_sig) {
+                int64_t lim = (INT64_MIN + num) / 10;
+                if (sum < lim) {
+                    return MCMC_TOKTO_ERANGE;
+                }
+                sum = sum * 10 - num;
+            } else {
+                int64_t lim = (INT64_MAX - num) / 10;
+                if (sum > lim) {
+                    return MCMC_TOKTO_ERANGE;
+                }
+                sum = sum * 10 + num;
+            }
+        } else {
+            return MCMC_TOKTO_EINVALID;
+        }
+        pos++;
+    }
+    *out = sum;
+    return 0;
+}
 
 // Directly parse a buffer with read data of size len.
 // r->reslen + r->vlen_read is the bytes consumed from the buffer read.

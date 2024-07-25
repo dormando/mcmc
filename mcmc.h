@@ -51,6 +51,11 @@
 #define MCMC_ERROR_CODE_MAX 32
 #define MCMC_ERROR_MSG_MAX 512
 
+#define MCMC_TOKTO_OK 0
+#define MCMC_TOKTO_ERANGE -1
+#define MCMC_TOKTO_ELONG -2
+#define MCMC_TOKTO_EINVALID -3
+
 typedef struct mcmc_resp_s {
     short type;
     short code;
@@ -82,6 +87,30 @@ typedef struct mcmc_resp_s {
     };
 } mcmc_resp_t;
 
+#define MCMC_PARSER_MAX_TOKENS 24
+#define MCMC_PARSER_MFLAG_HAS_SPACE (1)
+#define MCMC_PARSER_MFLAG_NOREPLY (1<<1)
+
+// FIXME: wanting to split this into two structs... one for tokenizer and one
+// for request object.
+typedef struct mcmc_tokenizer_s {
+    uint8_t ntokens;
+    uint16_t tokens[MCMC_PARSER_MAX_TOKENS]; // offsets for start of each token
+    uint64_t metaflags;
+} mcmc_tokenizer_t;
+
+typedef struct mcmc_req_s {
+    const char *request;
+    uint8_t command;
+    uint8_t cmd_type; // command class.
+    // FIXME: see if we can map this from command or CMD_TYPE
+    uint8_t keytoken; // because GAT. sigh. also cmds without a key.
+    uint8_t klen; // length of key.
+    uint8_t modeflags; // special indicators (noreply/etc)
+    int16_t llen; // full length of the protocol line
+    int32_t vlen; // length of the value if there is one
+} mcmc_req_t;
+
 int mcmc_fd(void *c);
 size_t mcmc_size(int options);
 size_t mcmc_min_buffer_size(int options);
@@ -95,4 +124,8 @@ int mcmc_request_writev(void *c, const struct iovec *iov, int iovcnt, ssize_t *s
 int mcmc_disconnect(void *c);
 void mcmc_get_error(void *c, char *code, size_t clen, char *msg, size_t mlen);
 
+int mcmc_toktou32(const char *t, size_t len, uint32_t *out);
+int mcmc_toktou64(const char *t, size_t len, uint64_t *out);
+int mcmc_tokto32(const char *t, size_t len, int32_t *out);
+int mcmc_tokto64(const char *t, size_t len, int64_t *out);
 #endif
