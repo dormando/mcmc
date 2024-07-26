@@ -1,5 +1,91 @@
 #include "utest.h"
+#define MCMC_TEST 1 // FIXME: re-run bear and remove this.
 #include "../mcmc.h"
+
+// token check.
+struct mc_tc {
+    int len;
+    char *tok;
+};
+
+#define MAX_TC 100
+struct mc_tokenize {
+    mcmc_tokenizer_t t;
+    int res; // result from tokenizer run
+    int ntokens;
+    uint64_t metaflags;
+    const char *line;
+    int llen;
+    int ntc;
+    struct mc_tc tc[MAX_TC];
+};
+
+UTEST_F_SETUP(mc_tokenize) {
+    // TODO: check if utest is doing this for us.
+    memset(utest_fixture, 0, sizeof(*utest_fixture));
+}
+
+UTEST_F_TEARDOWN(mc_tokenize) {
+    if (utest_fixture->res == 0) {
+        ASSERT_EQ(utest_fixture->t.ntokens, utest_fixture->ntokens);
+        ASSERT_EQ(utest_fixture->t.metaflags, utest_fixture->metaflags);
+        for (int x = 0; x < utest_fixture->ntc; x++) {
+            struct mc_tc tc = utest_fixture->tc[x];
+            ASSERT_EQ(_mcmc_token_len(utest_fixture->line, &utest_fixture->t, x), tc.len);
+            ASSERT_STRNEQ(tc.tok, _mcmc_token(utest_fixture->line, &utest_fixture->t, x, NULL), tc.len);
+        }
+    }
+    // else assume the main utest is doing some validation.
+}
+
+#define M(n, k) \
+    do { \
+        utest_fixture->line = line; \
+        utest_fixture->llen = llen; \
+        utest_fixture->ntc = n; \
+        utest_fixture->ntokens = k; \
+        memcpy(utest_fixture->tc, c, sizeof(c)); \
+        utest_fixture->res = res; \
+    } while(0); \
+
+UTEST_F(mc_tokenize, asciiset) {
+    const char *line = "set foo 5 10 2\r\n";
+    int llen = strlen(line);
+    struct mc_tc c[5] = {
+        {3, "set"}, {3, "foo"}, {1, "5"}, {2, "10"}, {1, "2"},
+    };
+
+    int res = _mcmc_tokenize_meta(&utest_fixture->t, line, llen, 999, MCMC_PARSER_MAX_TOKENS-1);
+    M(5, 5)
+}
+
+UTEST_F(mc_tokenize, asciiget) {
+    const char *line = "get foobar\r\n";
+    int llen = strlen(line);
+    struct mc_tc c[2] = {
+        {3, "get"}, {6, "foobar"},
+    };
+    int res = _mcmc_tokenize_meta(&utest_fixture->t, line, llen, 999, MCMC_PARSER_MAX_TOKENS-1);
+    M(2, 2)
+}
+
+// give a shorter len than the string and ensure proper parsing
+UTEST_F(mc_tokenize, asciishort) {
+    const char *line = "one two three four\r\n";
+    int llen = strlen(line) - 7;
+    struct mc_tc c[3] = {
+        {3, "one"}, {3, "two"}, {4, "thre"},
+    };
+    int res = _mcmc_tokenize_meta(&utest_fixture->t, line, llen, 999, MCMC_PARSER_MAX_TOKENS-1);
+    M(3, 3)
+}
+
+// TODO:
+// - check meta lines
+// - check what happens when garbage is given
+// - add checks for mcmc_token_toetc functions
+
+#undef M
 
 #define MAX 1024
 struct mc_valid {

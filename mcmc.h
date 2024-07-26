@@ -4,6 +4,14 @@
 #include <sys/uio.h>
 #include <stdint.h>
 
+// Allow exposing normally static functions to a test suite running in a
+// different module.
+#ifdef MCMC_TEST
+#define MCMC_STATIC
+#else
+#define MCMC_STATIC static
+#endif
+
 #define MCMC_OK 0
 #define MCMC_ERR -1
 #define MCMC_NOT_CONNECTED 1
@@ -124,8 +132,14 @@ int mcmc_request_writev(void *c, const struct iovec *iov, int iovcnt, ssize_t *s
 int mcmc_disconnect(void *c);
 void mcmc_get_error(void *c, char *code, size_t clen, char *msg, size_t mlen);
 
+#ifdef MCMC_TEST
 int mcmc_toktou32(const char *t, size_t len, uint32_t *out);
 int mcmc_toktou64(const char *t, size_t len, uint64_t *out);
 int mcmc_tokto32(const char *t, size_t len, int32_t *out);
 int mcmc_tokto64(const char *t, size_t len, int64_t *out);
+int _mcmc_tokenize_meta(mcmc_tokenizer_t *t, const char *line, size_t len, const int mstart, const int max);
+int _mcmc_token_len(const char *line, mcmc_tokenizer_t *t, size_t token);
+const char *_mcmc_token(const char *line, mcmc_tokenizer_t *t, size_t token, int *len);
 #endif
+
+#endif // MCMC_HEADER

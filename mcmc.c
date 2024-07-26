@@ -15,8 +15,6 @@
 // TODO: if there's a parse error or unknown status code, we likely have a
 // protocol desync and need to disconnect.
 
-// NOTE: this _will_ change a bit for adding TLS support.
-
 // A "reasonable" minimum buffer size to work with.
 // Callers are allowed to create a buffer of any size larger than this.
 // TODO: Put the math/documentation in here.
@@ -51,67 +49,14 @@ typedef struct mcmc_ctx {
 // Find the starting offsets of each token; ignoring length.
 // This creates a fast small (<= cacheline) index into the request,
 // where we later scan or directly feed data into API's.
-__attribute__((unused)) static int _mcmc_tokenize(mcmc_tokenizer_t *t, const char *line, size_t len, const int max) {
-    // TODO: do we need to find the \r\n and remove that from len?
-    const char *s = line;
-
-    // since multigets can be huge, we can't purely judge reqlen against this
-    // limit, but we also can't index past it since the tokens are shorts.
-    if (len > TOKENIZER_MAXLEN) {
-        len = TOKENIZER_MAXLEN;
-    }
-    const char *end = s + len;
-    int curtoken = 0;
-
-    int state = 0;
-    while (s != end) {
-        switch (state) {
-            case 0:
-                // scanning for first non-space to find a token.
-                if (*s != ' ') {
-                    t->tokens[curtoken] = s - line;
-                    if (++curtoken == max) {
-                        s++;
-                        state = 2;
-                        break;
-                    }
-                    state = 1;
-                }
-                s++;
-                break;
-            case 1:
-                // advance over a token
-                if (*s != ' ') {
-                    s++;
-                } else {
-                    state = 0;
-                }
-                break;
-            case 2:
-                // hit max tokens before end of the line.
-                // keep advancing so we can place endcap token.
-                if (*s == ' ') {
-                    goto endloop;
-                }
-                s++;
-                break;
-        }
-    }
-endloop:
-
-    // endcap token so we can quickly find the length of any token by looking
-    // at the next one.
-    t->tokens[curtoken] = s - line;
-    t->ntokens = curtoken;
-
-    return 0;
-}
+#define _mcmc_tokenize(t, line, len, mstart, max) _mcmc_tokenize_meta(t, line, len, INT_MAX, max)
 
 // specialized tokenizer for meta protocol commands or responses, fills in the
 // bitflags while scanning.
-// FIXME: keep one function and set mstart to INTMAX if not meta?
-__attribute__((unused)) static int _mcmc_tokenize_meta(mcmc_tokenizer_t *t, const char *line, size_t len, const int mstart, const int max) {
-    // TODO: do we need to find the \r\n and remove that from len?
+// Function _assumes_ const char *line ends with \n or \r\n, but will not
+// break so long as the passed in 'len' is reasonable.
+__attribute__((unused)) MCMC_STATIC int _mcmc_tokenize_meta(mcmc_tokenizer_t *t, const char *line, size_t len, const int mstart, const int max) {
+    // FIXME: detect \r\n and reduce len
     const char *s = line;
 
     // since multigets can be huge, we can't purely judge reqlen against this
@@ -119,6 +64,13 @@ __attribute__((unused)) static int _mcmc_tokenize_meta(mcmc_tokenizer_t *t, cons
     if (len > TOKENIZER_MAXLEN) {
         len = TOKENIZER_MAXLEN;
     }
+
+    if (line[len-2] == '\r') {
+        len -= 2;
+    } else {
+        len -= 1;
+    }
+
     const char *end = s + len;
     int curtoken = 0;
 
@@ -170,15 +122,27 @@ endloop:
     return 0;
 }
 
-/*static int _process_token_len(mcp_parser_t *pr, size_t token) {
-    const char *s = pr->request + pr->tokens[token];
-    const char *e = pr->request + pr->tokens[token+1];
+__attribute__((unused)) MCMC_STATIC int _mcmc_token_len(const char *line, mcmc_tokenizer_t *t, size_t token) {
+    const char *s = line + t->tokens[token];
+    const char *e = line + t->tokens[token+1];
     // start of next token is after any space delimiters, so back those out.
     while (*(e-1) == ' ') {
         e--;
     }
     return e - s;
-}*/
+}
+
+__attribute__((unused)) MCMC_STATIC const char *_mcmc_token(const char *line, mcmc_tokenizer_t *t, size_t token, int *len) {
+    const char *s = line + t->tokens[token];
+    if (len != NULL) {
+        const char *e = line + t->tokens[token+1];
+        while (*(e-1) == ' ') {
+            e--;
+        }
+        *len = e - s;
+    }
+    return s;
+}
 
 static int _mcmc_parse_value_line(const char *buf, size_t read, mcmc_resp_t *r) {
     // we know that "VALUE " has matched, so skip that.
@@ -505,7 +469,7 @@ static int _mcmc_parse_response(const char *buf, size_t read, mcmc_resp_t *r) {
 // hardware boost.
 // just need to split the mul and the add? if (__builtin_mul_overflow(etc))
 // - need a method to force compile both functions for the test suite.
-int mcmc_toktou32(const char *t, size_t len, uint32_t *out) {
+MCMC_STATIC int mcmc_toktou32(const char *t, size_t len, uint32_t *out) {
     uint32_t sum = 0;
     const char *pos = t;
     // We clamp the possible length to make input length errors less likely to
@@ -530,7 +494,7 @@ int mcmc_toktou32(const char *t, size_t len, uint32_t *out) {
     return 0;
 }
 
-int mcmc_toktou64(const char *t, size_t len, uint64_t *out) {
+MCMC_STATIC int mcmc_toktou64(const char *t, size_t len, uint64_t *out) {
     uint64_t sum = 0;
     const char *pos = t;
     if (len > MCMC_TOKTO64_MAX) {
@@ -553,7 +517,7 @@ int mcmc_toktou64(const char *t, size_t len, uint64_t *out) {
     return 0;
 }
 
-int mcmc_tokto32(const char *t, size_t len, int32_t *out) {
+MCMC_STATIC int mcmc_tokto32(const char *t, size_t len, int32_t *out) {
     int32_t sum = 0;
     const char *pos = t;
     int is_sig = 0;
@@ -591,7 +555,7 @@ int mcmc_tokto32(const char *t, size_t len, int32_t *out) {
     return 0;
 }
 
-int mcmc_tokto64(const char *t, size_t len, int64_t *out) {
+MCMC_STATIC int mcmc_tokto64(const char *t, size_t len, int64_t *out) {
     int64_t sum = 0;
     const char *pos = t;
     int is_sig = 0;
