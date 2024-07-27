@@ -13,6 +13,7 @@
 #endif
 
 #define MCMC_OK 0
+#define MCMC_NOK 1
 #define MCMC_ERR -1
 #define MCMC_NOT_CONNECTED 1
 #define MCMC_CONNECTED 2
@@ -99,10 +100,9 @@ typedef struct mcmc_resp_s {
 #define MCMC_PARSER_MFLAG_HAS_SPACE (1)
 #define MCMC_PARSER_MFLAG_NOREPLY (1<<1)
 
-// FIXME: wanting to split this into two structs... one for tokenizer and one
-// for request object.
 typedef struct mcmc_tokenizer_s {
     uint8_t ntokens;
+    uint8_t mstart; // token where meta flags begin
     uint16_t tokens[MCMC_PARSER_MAX_TOKENS]; // offsets for start of each token
     uint64_t metaflags;
 } mcmc_tokenizer_t;
@@ -131,6 +131,20 @@ int mcmc_request_writev(void *c, const struct iovec *iov, int iovcnt, ssize_t *s
 //int mcmc_read_value(void *c, char *val, mcmc_resp_t *r, int *read);
 int mcmc_disconnect(void *c);
 void mcmc_get_error(void *c, char *code, size_t clen, char *msg, size_t mlen);
+
+#define mcmc_token_count(t) (t->ntokens)
+const char *mcmc_token_get(const char *l, mcmc_tokenizer_t *t, int idx, int *len);
+int mcmc_token_get_u32(const char *l, mcmc_tokenizer_t *t, int idx, uint32_t *val);
+int mcmc_token_get_u64(const char *l, mcmc_tokenizer_t *t, int idx, uint64_t *val);
+int mcmc_token_get_32(const char *l, mcmc_tokenizer_t *t, int idx, int32_t *val);
+int mcmc_token_get_64(const char *l, mcmc_tokenizer_t *t, int idx, int64_t *val);
+int mcmc_token_has_flag(const char *l, mcmc_tokenizer_t *t, char flag);
+const char *mcmc_token_get_flag(const char *l, mcmc_tokenizer_t *t, char flag, int *len);
+int mcmc_token_get_flag_u32(const char *l, mcmc_tokenizer_t *t, char flag, uint32_t *val);
+int mcmc_token_get_flag_u64(const char *l, mcmc_tokenizer_t *t, char flag, uint64_t *val);
+int mcmc_token_get_flag_32(const char *l, mcmc_tokenizer_t *t, char flag, int32_t *val);
+int mcmc_token_get_flag_64(const char *l, mcmc_tokenizer_t *t, char flag, int64_t *val);
+int mcmc_token_get_flag_idx(const char *l, mcmc_tokenizer_t *t, char flag);
 
 #ifdef MCMC_TEST
 int mcmc_toktou32(const char *t, size_t len, uint32_t *out);

@@ -55,7 +55,7 @@ UTEST_F(mc_tokenize, asciiset) {
         {3, "set"}, {3, "foo"}, {1, "5"}, {2, "10"}, {1, "2"},
     };
 
-    int res = _mcmc_tokenize_meta(&utest_fixture->t, line, llen, 999, MCMC_PARSER_MAX_TOKENS-1);
+    int res = _mcmc_tokenize_meta(&utest_fixture->t, line, llen, 250, MCMC_PARSER_MAX_TOKENS-1);
     M(5, 5)
 }
 
@@ -65,7 +65,7 @@ UTEST_F(mc_tokenize, asciiget) {
     struct mc_tc c[2] = {
         {3, "get"}, {6, "foobar"},
     };
-    int res = _mcmc_tokenize_meta(&utest_fixture->t, line, llen, 999, MCMC_PARSER_MAX_TOKENS-1);
+    int res = _mcmc_tokenize_meta(&utest_fixture->t, line, llen, 250, MCMC_PARSER_MAX_TOKENS-1);
     M(2, 2)
 }
 
@@ -290,5 +290,46 @@ M(series, "12345678", -1, 0, 12345678)
 // TODO:
 // mcmc_toktou64
 // mcmc_tokto64
+
+UTEST(mflag, has) {
+    const char *l = "mg foo s t v f O1234 k N5000\r\n";
+    size_t len = strlen(l);
+    mcmc_tokenizer_t t = {0};
+    int res = _mcmc_tokenize_meta(&t, l, len, 2, 24);
+    ASSERT_EQ(res, 0);
+    ASSERT_EQ(mcmc_token_has_flag(l, &t, 's'), MCMC_OK);
+}
+
+// TODO: test failures
+UTEST(mcmc_token, get_u32) {
+    const char *l = "set f 1 22 333\r\n";
+    size_t len = strlen(l);
+    mcmc_tokenizer_t t = {0};
+    int res = _mcmc_tokenize_meta(&t, l, len, 255, 24);
+    ASSERT_EQ(res, 0);
+    uint32_t num = 0;
+    ASSERT_EQ(mcmc_token_get_u32(l, &t, 2, &num), MCMC_OK);
+    ASSERT_EQ(num, 1);
+    ASSERT_EQ(mcmc_token_get_u32(l, &t, 3, &num), MCMC_OK);
+    ASSERT_EQ(num, 22);
+    ASSERT_EQ(mcmc_token_get_u32(l, &t, 4, &num), MCMC_OK);
+    ASSERT_EQ(num, 333);
+}
+
+// TODO: test failures
+UTEST(mcmc_token, flag_int_u32) {
+    const char *l = "mg foo C1234 O9999 N300\r\n";
+    size_t len = strlen(l);
+    mcmc_tokenizer_t t = {0};
+    int res = _mcmc_tokenize_meta(&t, l, len, 2, 24);
+    ASSERT_EQ(res, 0);
+    uint32_t num = 0;
+    ASSERT_EQ(mcmc_token_get_flag_u32(l, &t, 'C', &num), MCMC_OK);
+    ASSERT_EQ(num, 1234);
+    ASSERT_EQ(mcmc_token_get_flag_u32(l, &t, 'O', &num), MCMC_OK);
+    ASSERT_EQ(num, 9999);
+    ASSERT_EQ(mcmc_token_get_flag_u32(l, &t, 'N', &num), MCMC_OK);
+    ASSERT_EQ(num, 300);
+}
 
 UTEST_MAIN()

@@ -49,7 +49,7 @@ typedef struct mcmc_ctx {
 // Find the starting offsets of each token; ignoring length.
 // This creates a fast small (<= cacheline) index into the request,
 // where we later scan or directly feed data into API's.
-#define _mcmc_tokenize(t, line, len, mstart, max) _mcmc_tokenize_meta(t, line, len, INT_MAX, max)
+#define _mcmc_tokenize(t, line, len, mstart, max) _mcmc_tokenize_meta(t, line, len, UINT8_MAX, max)
 
 // specialized tokenizer for meta protocol commands or responses, fills in the
 // bitflags while scanning.
@@ -81,7 +81,7 @@ __attribute__((unused)) MCMC_STATIC int _mcmc_tokenize_meta(mcmc_tokenizer_t *t,
                 // scanning for first non-space to find a token.
                 if (*s != ' ') {
                     // FIXME: blow out if flag is out of range
-                    if (curtoken > mstart && *s > 64 && *s < 123) {
+                    if (curtoken >= mstart && *s > 64 && *s < 123) {
                         t->metaflags |= (uint64_t)1 << (*s - 65);
                     }
                     t->tokens[curtoken] = s - line;
@@ -118,6 +118,7 @@ endloop:
     // at the next one.
     t->tokens[curtoken] = s - line;
     t->ntokens = curtoken;
+    t->mstart = mstart;
 
     return 0;
 }
@@ -456,10 +457,6 @@ static int _mcmc_parse_response(const char *buf, size_t read, mcmc_resp_t *r) {
     }
 }
 
-// END INTERNAL FUNCTIONS
-
-// Context-less bare API.
-
 // TODO: possible to codegen the 32 vs 64 variants
 // easy with a macro I just hate how that looks
 #define MCMC_TOKTO32_MAX 11
@@ -491,7 +488,7 @@ MCMC_STATIC int mcmc_toktou32(const char *t, size_t len, uint32_t *out) {
         pos++;
     }
     *out = sum;
-    return 0;
+    return MCMC_OK;
 }
 
 MCMC_STATIC int mcmc_toktou64(const char *t, size_t len, uint64_t *out) {
@@ -514,7 +511,7 @@ MCMC_STATIC int mcmc_toktou64(const char *t, size_t len, uint64_t *out) {
         pos++;
     }
     *out = sum;
-    return 0;
+    return MCMC_OK;
 }
 
 MCMC_STATIC int mcmc_tokto32(const char *t, size_t len, int32_t *out) {
@@ -552,7 +549,7 @@ MCMC_STATIC int mcmc_tokto32(const char *t, size_t len, int32_t *out) {
         pos++;
     }
     *out = sum;
-    return 0;
+    return MCMC_OK;
 }
 
 MCMC_STATIC int mcmc_tokto64(const char *t, size_t len, int64_t *out) {
@@ -590,7 +587,110 @@ MCMC_STATIC int mcmc_tokto64(const char *t, size_t len, int64_t *out) {
         pos++;
     }
     *out = sum;
-    return 0;
+    return MCMC_OK;
+}
+
+// END INTERNAL FUNCTIONS
+
+// Context-less bare API.
+
+const char *mcmc_token_get(const char *l, mcmc_tokenizer_t *t, int idx, int *len) {
+    if (idx > 0 && idx < t->ntokens) {
+        return _mcmc_token(l, t, idx, len);
+    } else {
+        return NULL;
+    }
+}
+
+// FIXME: delete once tested.
+/*int mcmc_token_get_u32(const char *l, mcmc_tokenizer_t *t, int idx, uint32_t *val) {
+    if (idx > 0 && idx < t->ntokens) {
+        int tlen = 0;
+        const char *tok = _mcmc_token(l, t, idx, &tlen);
+        return mcmc_toktou32(tok, tlen, val);
+    } else {
+        return MCMC_ERR;
+    }
+}*/
+
+#define X(n, p, c) \
+    int n(const char *l, mcmc_tokenizer_t *t, int idx, p *val) { \
+        if (idx > 0 && idx < t->ntokens) { \
+            int tlen = 0; \
+            const char *tok = _mcmc_token(l, t, idx, &tlen); \
+            return c(tok, tlen, val); \
+        } else { \
+            return MCMC_ERR; \
+        } \
+    }
+
+X(mcmc_token_get_u32, uint32_t, mcmc_toktou32)
+X(mcmc_token_get_u64, uint64_t, mcmc_toktou64)
+X(mcmc_token_get_32, int32_t, mcmc_tokto32)
+X(mcmc_token_get_64, int64_t, mcmc_tokto64)
+
+#undef X
+
+int mcmc_token_has_flag(const char *l, mcmc_tokenizer_t *t, char flag) {
+    flag -= 65;
+    if (flag < 0 || flag > 57) {
+        return MCMC_ERR;
+    }
+    uint64_t flagbit = (uint64_t)1 << flag;
+    if (t->metaflags & flagbit) {
+        return MCMC_OK;
+    } else {
+        return MCMC_NOK;
+    }
+}
+
+const char *mcmc_token_get_flag(const char *l, mcmc_tokenizer_t *t, char flag, int *len) {
+    // ensure the flag exists before we search the string.
+    if (mcmc_token_has_flag(l, t, flag) != MCMC_OK) {
+        return NULL;
+    }
+    for (int x = t->mstart; x < t->ntokens; x++) {
+        const char *tflag = l + t->tokens[x];
+        if (tflag[0] == flag) {
+            if (len) {
+                *len = _mcmc_token_len(l, t, x);
+            }
+            return tflag;
+        }
+    }
+
+    return NULL;
+}
+
+// FIXME: need to map out return codes and drive more consistency.
+// TODO: once tested, turn to macro for u64/32/64
+int mcmc_token_get_flag_u32(const char *l, mcmc_tokenizer_t *t, char flag, uint32_t *val) {
+    if (mcmc_token_has_flag(l, t, flag) != MCMC_OK) {
+        return MCMC_NOK;
+    }
+    for (int x = t->mstart; x < t->ntokens; x++) {
+        const char *tflag = l + t->tokens[x];
+        if (tflag[0] == flag) {
+            int tlen = _mcmc_token_len(l, t, x);
+            return mcmc_toktou32(tflag+1, tlen-1, val);
+        }
+    }
+
+    return MCMC_NOK;
+}
+
+int mcmc_token_get_flag_idx(const char *l, mcmc_tokenizer_t *t, char flag) {
+    if (mcmc_token_has_flag(l, t, flag) != MCMC_OK) {
+        return -1;
+    }
+    for (int x = t->mstart; x < t->ntokens; x++) {
+        const char *tflag = l + t->tokens[x];
+        if (tflag[0] == flag) {
+            return x;
+        }
+    }
+
+    return -1;
 }
 
 // Directly parse a buffer with read data of size len.
