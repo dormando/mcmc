@@ -132,6 +132,12 @@ int mcmc_request_writev(void *c, const struct iovec *iov, int iovcnt, ssize_t *s
 int mcmc_disconnect(void *c);
 void mcmc_get_error(void *c, char *code, size_t clen, char *msg, size_t mlen);
 
+// TODO: experimental interface. high chance of changing.
+// all meta results are of format "XX m e t a", so if we know it's a result we
+// know where to start on the meta tokens.
+// For full usage this should probably also be supplied with a "mcmc_res_t" so
+// it can figure out what to call.
+int mcmc_tokenize_res(const char *l, size_t len, mcmc_tokenizer_t *t);
 #define mcmc_token_count(t) (t->ntokens)
 const char *mcmc_token_get(const char *l, mcmc_tokenizer_t *t, int idx, int *len);
 int mcmc_token_get_u32(const char *l, mcmc_tokenizer_t *t, int idx, uint32_t *val);
@@ -139,6 +145,7 @@ int mcmc_token_get_u64(const char *l, mcmc_tokenizer_t *t, int idx, uint64_t *va
 int mcmc_token_get_32(const char *l, mcmc_tokenizer_t *t, int idx, int32_t *val);
 int mcmc_token_get_64(const char *l, mcmc_tokenizer_t *t, int idx, int64_t *val);
 int mcmc_token_has_flag(const char *l, mcmc_tokenizer_t *t, char flag);
+int mcmc_token_has_flag_bit(mcmc_tokenizer_t *t, uint64_t flag);
 const char *mcmc_token_get_flag(const char *l, mcmc_tokenizer_t *t, char flag, int *len);
 int mcmc_token_get_flag_u32(const char *l, mcmc_tokenizer_t *t, char flag, uint32_t *val);
 int mcmc_token_get_flag_u64(const char *l, mcmc_tokenizer_t *t, char flag, uint64_t *val);

@@ -55,7 +55,7 @@ typedef struct mcmc_ctx {
 // bitflags while scanning.
 // Function _assumes_ const char *line ends with \n or \r\n, but will not
 // break so long as the passed in 'len' is reasonable.
-__attribute__((unused)) MCMC_STATIC int _mcmc_tokenize_meta(mcmc_tokenizer_t *t, const char *line, size_t len, const int mstart, const int max) {
+MCMC_STATIC int _mcmc_tokenize_meta(mcmc_tokenizer_t *t, const char *line, size_t len, const int mstart, const int max) {
     // FIXME: detect \r\n and reduce len
     const char *s = line;
 
@@ -594,6 +594,17 @@ MCMC_STATIC int mcmc_tokto64(const char *t, size_t len, int64_t *out) {
 
 // Context-less bare API.
 
+//MCMC_STATIC int _mcmc_tokenize_meta(mcmc_tokenizer_t *t, const char *line, size_t len, const int mstart, const int max) {
+
+// TODO: ideally this does a macro test of t->ntokens before calling a
+// function. are compilers smart enough that I don't have to do this tho?
+int mcmc_tokenize_res(const char *l, size_t len, mcmc_tokenizer_t *t) {
+    if (t->ntokens == 0) {
+        return _mcmc_tokenize_meta(t, l, len, 1, MCMC_PARSER_MAX_TOKENS-1);
+    }
+    return 0;
+}
+
 const char *mcmc_token_get(const char *l, mcmc_tokenizer_t *t, int idx, int *len) {
     if (idx > 0 && idx < t->ntokens) {
         return _mcmc_token(l, t, idx, len);
@@ -631,6 +642,15 @@ X(mcmc_token_get_64, int64_t, mcmc_tokto64)
 
 #undef X
 
+// FIXME: macro and/or inline definition?
+int mcmc_token_has_flag_bit(mcmc_tokenizer_t *t, uint64_t flag) {
+    if (t->metaflags & flag) {
+        return MCMC_OK;
+    } else {
+        return MCMC_NOK;
+    }
+}
+
 int mcmc_token_has_flag(const char *l, mcmc_tokenizer_t *t, char flag) {
     flag -= 65;
     if (flag < 0 || flag > 57) {
@@ -646,16 +666,24 @@ int mcmc_token_has_flag(const char *l, mcmc_tokenizer_t *t, char flag) {
 
 const char *mcmc_token_get_flag(const char *l, mcmc_tokenizer_t *t, char flag, int *len) {
     // ensure the flag exists before we search the string.
+    // FIXME: remove this check. let the user pick has flag or has flag bit
+    // then call this.
     if (mcmc_token_has_flag(l, t, flag) != MCMC_OK) {
         return NULL;
     }
     for (int x = t->mstart; x < t->ntokens; x++) {
         const char *tflag = l + t->tokens[x];
         if (tflag[0] == flag) {
-            if (len) {
-                *len = _mcmc_token_len(l, t, x);
+            int tlen = _mcmc_token_len(l, t, x) - 1; // subtract the flag.
+            // ensure the flag actually has a token.
+            if (tlen > 0) {
+                if (len) {
+                    *len = tlen;
+                }
+                return tflag+1;
+            } else {
+                break;
             }
-            return tflag;
         }
     }
 
@@ -673,6 +701,21 @@ int mcmc_token_get_flag_u32(const char *l, mcmc_tokenizer_t *t, char flag, uint3
         if (tflag[0] == flag) {
             int tlen = _mcmc_token_len(l, t, x);
             return mcmc_toktou32(tflag+1, tlen-1, val);
+        }
+    }
+
+    return MCMC_NOK;
+}
+
+int mcmc_token_get_flag_64(const char *l, mcmc_tokenizer_t *t, char flag, int64_t *val) {
+    if (mcmc_token_has_flag(l, t, flag) != MCMC_OK) {
+        return MCMC_NOK;
+    }
+    for (int x = t->mstart; x < t->ntokens; x++) {
+        const char *tflag = l + t->tokens[x];
+        if (tflag[0] == flag) {
+            int tlen = _mcmc_token_len(l, t, x);
+            return mcmc_tokto64(tflag+1, tlen-1, val);
         }
     }
 
