@@ -13,7 +13,7 @@
 #endif
 
 #define MCMC_OK 0
-#define MCMC_NOK 1
+#define MCMC_NOK -2
 #define MCMC_ERR -1
 #define MCMC_NOT_CONNECTED 1
 #define MCMC_CONNECTED 2
@@ -145,7 +145,7 @@ int mcmc_token_get_u64(const char *l, mcmc_tokenizer_t *t, int idx, uint64_t *va
 int mcmc_token_get_32(const char *l, mcmc_tokenizer_t *t, int idx, int32_t *val);
 int mcmc_token_get_64(const char *l, mcmc_tokenizer_t *t, int idx, int64_t *val);
 int mcmc_token_has_flag(const char *l, mcmc_tokenizer_t *t, char flag);
-int mcmc_token_has_flag_bit(mcmc_tokenizer_t *t, uint64_t flag);
+#define mcmc_token_has_flag_bit(t, f) (((t)->metaflags & f) ? MCMC_OK : MCMC_NOK)
 const char *mcmc_token_get_flag(const char *l, mcmc_tokenizer_t *t, char flag, int *len);
 int mcmc_token_get_flag_u32(const char *l, mcmc_tokenizer_t *t, char flag, uint32_t *val);
 int mcmc_token_get_flag_u64(const char *l, mcmc_tokenizer_t *t, char flag, uint64_t *val);

@@ -7,6 +7,7 @@
 #include <string.h>
 #include <errno.h>
 #include <stdio.h>
+#include <limits.h>
 
 // TODO: move these structs into mcmc.h, but only expose them if
 // MCMC_EXPOSE_INTERNALS is defined... for tests and this thing.
@@ -43,8 +44,7 @@ typedef struct mcmc_ctx {
 
 // INTERNAL FUNCTIONS
 
-// FIXME: USHRT_MAX?
-#define TOKENIZER_MAXLEN (1<<16)-1
+#define TOKENIZER_MAXLEN USHRT_MAX
 
 // Find the starting offsets of each token; ignoring length.
 // This creates a fast small (<= cacheline) index into the request,
@@ -56,7 +56,6 @@ typedef struct mcmc_ctx {
 // Function _assumes_ const char *line ends with \n or \r\n, but will not
 // break so long as the passed in 'len' is reasonable.
 MCMC_STATIC int _mcmc_tokenize_meta(mcmc_tokenizer_t *t, const char *line, size_t len, const int mstart, const int max) {
-    // FIXME: detect \r\n and reduce len
     const char *s = line;
 
     // since multigets can be huge, we can't purely judge reqlen against this
@@ -80,9 +79,12 @@ MCMC_STATIC int _mcmc_tokenize_meta(mcmc_tokenizer_t *t, const char *line, size_
             case 0:
                 // scanning for first non-space to find a token.
                 if (*s != ' ') {
-                    // FIXME: blow out if flag is out of range
-                    if (curtoken >= mstart && *s > 64 && *s < 123) {
-                        t->metaflags |= (uint64_t)1 << (*s - 65);
+                    if (curtoken >= mstart) {
+                        if (*s > 64 && *s < 123) {
+                            t->metaflags |= (uint64_t)1 << (*s - 65);
+                        } else {
+                            return MCMC_NOK;
+                        }
                     }
                     t->tokens[curtoken] = s - line;
                     if (++curtoken == max) {
@@ -120,7 +122,7 @@ endloop:
     t->ntokens = curtoken;
     t->mstart = mstart;
 
-    return 0;
+    return MCMC_OK;
 }
 
 __attribute__((unused)) MCMC_STATIC int _mcmc_token_len(const char *line, mcmc_tokenizer_t *t, size_t token) {
@@ -613,17 +615,6 @@ const char *mcmc_token_get(const char *l, mcmc_tokenizer_t *t, int idx, int *len
     }
 }
 
-// FIXME: delete once tested.
-/*int mcmc_token_get_u32(const char *l, mcmc_tokenizer_t *t, int idx, uint32_t *val) {
-    if (idx > 0 && idx < t->ntokens) {
-        int tlen = 0;
-        const char *tok = _mcmc_token(l, t, idx, &tlen);
-        return mcmc_toktou32(tok, tlen, val);
-    } else {
-        return MCMC_ERR;
-    }
-}*/
-
 #define X(n, p, c) \
     int n(const char *l, mcmc_tokenizer_t *t, int idx, p *val) { \
         if (idx > 0 && idx < t->ntokens) { \
@@ -642,15 +633,6 @@ X(mcmc_token_get_64, int64_t, mcmc_tokto64)
 
 #undef X
 
-// FIXME: macro and/or inline definition?
-int mcmc_token_has_flag_bit(mcmc_tokenizer_t *t, uint64_t flag) {
-    if (t->metaflags & flag) {
-        return MCMC_OK;
-    } else {
-        return MCMC_NOK;
-    }
-}
-
 int mcmc_token_has_flag(const char *l, mcmc_tokenizer_t *t, char flag) {
     flag -= 65;
     if (flag < 0 || flag > 57) {
@@ -664,13 +646,11 @@ int mcmc_token_has_flag(const char *l, mcmc_tokenizer_t *t, char flag) {
     }
 }
 
+// User can optionally call has_flag or has_flag_bit before calling these
+// functions. Is optional because it can be either wasteful to check if the
+// flag will always be there, or it's useful to the caller to know the flag
+// exists but there wasn't a token attached or we failed to parse it.
 const char *mcmc_token_get_flag(const char *l, mcmc_tokenizer_t *t, char flag, int *len) {
-    // ensure the flag exists before we search the string.
-    // FIXME: remove this check. let the user pick has flag or has flag bit
-    // then call this.
-    if (mcmc_token_has_flag(l, t, flag) != MCMC_OK) {
-        return NULL;
-    }
     for (int x = t->mstart; x < t->ntokens; x++) {
         const char *tflag = l + t->tokens[x];
         if (tflag[0] == flag) {
@@ -690,12 +670,8 @@ const char *mcmc_token_get_flag(const char *l, mcmc_tokenizer_t *t, char flag, i
     return NULL;
 }
 
-// FIXME: need to map out return codes and drive more consistency.
 // TODO: once tested, turn to macro for u64/32/64
 int mcmc_token_get_flag_u32(const char *l, mcmc_tokenizer_t *t, char flag, uint32_t *val) {
-    if (mcmc_token_has_flag(l, t, flag) != MCMC_OK) {
-        return MCMC_NOK;
-    }
     for (int x = t->mstart; x < t->ntokens; x++) {
         const char *tflag = l + t->tokens[x];
         if (tflag[0] == flag) {
@@ -708,9 +684,6 @@ int mcmc_token_get_flag_u32(const char *l, mcmc_tokenizer_t *t, char flag, uint3
 }
 
 int mcmc_token_get_flag_64(const char *l, mcmc_tokenizer_t *t, char flag, int64_t *val) {
-    if (mcmc_token_has_flag(l, t, flag) != MCMC_OK) {
-        return MCMC_NOK;
-    }
     for (int x = t->mstart; x < t->ntokens; x++) {
         const char *tflag = l + t->tokens[x];
         if (tflag[0] == flag) {
@@ -723,9 +696,6 @@ int mcmc_token_get_flag_64(const char *l, mcmc_tokenizer_t *t, char flag, int64_
 }
 
 int mcmc_token_get_flag_idx(const char *l, mcmc_tokenizer_t *t, char flag) {
-    if (mcmc_token_has_flag(l, t, flag) != MCMC_OK) {
-        return -1;
-    }
     for (int x = t->mstart; x < t->ntokens; x++) {
         const char *tflag = l + t->tokens[x];
         if (tflag[0] == flag) {
