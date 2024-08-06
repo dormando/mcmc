@@ -670,26 +670,41 @@ const char *mcmc_token_get_flag(const char *l, mcmc_tokenizer_t *t, char flag, i
     return NULL;
 }
 
-// TODO: once tested, turn to macro for u64/32/64
 int mcmc_token_get_flag_u32(const char *l, mcmc_tokenizer_t *t, char flag, uint32_t *val) {
-    for (int x = t->mstart; x < t->ntokens; x++) {
-        const char *tflag = l + t->tokens[x];
-        if (tflag[0] == flag) {
-            int tlen = _mcmc_token_len(l, t, x);
-            return mcmc_toktou32(tflag+1, tlen-1, val);
-        }
+    int tlen = 0;
+    const char *tok = mcmc_token_get_flag(l, t, flag, &tlen);
+    if (tok) {
+        return mcmc_toktou32(tok, tlen, val);
+    }
+
+    return MCMC_NOK;
+}
+
+int mcmc_token_get_flag_u64(const char *l, mcmc_tokenizer_t *t, char flag, uint64_t *val) {
+    int tlen = 0;
+    const char *tok = mcmc_token_get_flag(l, t, flag, &tlen);
+    if (tok) {
+        return mcmc_toktou64(tok, tlen, val);
+    }
+
+    return MCMC_NOK;
+}
+
+int mcmc_token_get_flag_32(const char *l, mcmc_tokenizer_t *t, char flag, int32_t *val) {
+    int tlen = 0;
+    const char *tok = mcmc_token_get_flag(l, t, flag, &tlen);
+    if (tok) {
+        return mcmc_tokto32(tok, tlen, val);
     }
 
     return MCMC_NOK;
 }
 
 int mcmc_token_get_flag_64(const char *l, mcmc_tokenizer_t *t, char flag, int64_t *val) {
-    for (int x = t->mstart; x < t->ntokens; x++) {
-        const char *tflag = l + t->tokens[x];
-        if (tflag[0] == flag) {
-            int tlen = _mcmc_token_len(l, t, x);
-            return mcmc_tokto64(tflag+1, tlen-1, val);
-        }
+    int tlen = 0;
+    const char *tok = mcmc_token_get_flag(l, t, flag, &tlen);
+    if (tok) {
+        return mcmc_tokto64(tok, tlen, val);
     }
 
     return MCMC_NOK;
