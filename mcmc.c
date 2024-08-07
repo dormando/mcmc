@@ -502,7 +502,7 @@ MCMC_STATIC int mcmc_toktou64(const char *t, size_t len, uint64_t *out) {
     while (len--) {
         char num = pos[0] - '0';
         if (num > -1 && num < 10) {
-            uint32_t lim = (UINT64_MAX - num) / 10;
+            uint64_t lim = (UINT64_MAX - num) / 10;
             if (sum > lim) {
                 return MCMC_TOKTO_ERANGE;
             }

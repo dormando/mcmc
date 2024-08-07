@@ -80,10 +80,25 @@ UTEST_F(mc_tokenize, asciishort) {
     M(3, 3)
 }
 
-// TODO:
-// - check meta lines
-// - check what happens when garbage is given
-// - add checks for mcmc_token_toetc functions
+#define mfbit(f) ((uint64_t)1 << (f - 65))
+
+UTEST_F(mc_tokenize, metaget) {
+    const char *line = "mg foo s t Oabcd\r\n";
+    int llen = strlen(line);
+    struct mc_tc c[5] = {
+        {2, "mg"}, {3, "foo"}, {1, "s"}, {1, "t"}, {5, "Oabcd"},
+    };
+    utest_fixture->metaflags = mfbit('s') | mfbit('t') | mfbit('O');
+    int res = _mcmc_tokenize_meta(&utest_fixture->t, line, llen, 2, MCMC_PARSER_MAX_TOKENS-1);
+    M(5, 5);
+}
+
+UTEST_F(mc_tokenize, garbage) {
+    const char *line = "??P <?? || @#@# !**! *!#$\r\n";
+    int llen = strlen(line);
+    int res = _mcmc_tokenize_meta(&utest_fixture->t, line, llen, 2, MCMC_PARSER_MAX_TOKENS-1);
+    ASSERT_EQ(res, MCMC_NOK);
+}
 
 #undef M
 
@@ -289,7 +304,100 @@ M(series, "12345678", -1, 0, 12345678)
 
 // TODO:
 // mcmc_toktou64
-// mcmc_tokto64
+
+struct mc_tokto64 {
+    const char *tok;
+    size_t tlen;
+    int res;
+    int64_t out;
+};
+UTEST_F_SETUP(mc_tokto64) {
+}
+UTEST_F_TEARDOWN(mc_tokto64) {
+    int64_t out = 0;
+    int res = mcmc_tokto64(utest_fixture->tok,
+            utest_fixture->tlen, &out);
+    ASSERT_EQ(res, utest_fixture->res);
+    ASSERT_EQ(out, utest_fixture->out);
+}
+
+#define M(d, t, tl, r, o) \
+    UTEST_F(mc_tokto64, d) { \
+        if (tl == -1) { \
+            utest_fixture->tlen = strlen(t); \
+        } else { \
+            utest_fixture->tlen = tl; \
+        } \
+        utest_fixture->tok = t; \
+        utest_fixture->res = r; \
+        utest_fixture->out = o; \
+    }
+
+M(toolong, "9876", 5000, -2, 0)
+M(neglen, "5678", -2, -2, 0)
+M(small, "1234", 3, 0, 123)
+M(junk, "asdf", -1, -3, 0)
+M(midjunk, "1234foo5678", -1, -3, 0)
+M(neg, "-5", -1, 0, -5)
+M(max, "2147483647", -1, 0, INT32_MAX)
+M(max64, "9223372036854775807", -1, 0, INT64_MAX)
+M(oneover32, "2147483648", -1, 0, 2147483648LL)
+M(min, "-2147483648", -1, 0, INT32_MIN)
+M(min64, "-9223372036854775808", -1, 0, INT64_MIN)
+M(oneunder32, "-2147483649", -1, 0, -2147483649LL)
+M(overflow, "9999999999999999999", -1, -1, 0)
+M(underflow, "-9999999999999999999", -1, -1, 0)
+M(five, "5", 1, 0, 5)
+M(zero, "0", 1, 0, 0)
+M(manyzero, "00000", -1, 0, 0)
+M(series, "12345678", -1, 0, 12345678)
+
+#undef M
+
+struct mc_toktou64 {
+    const char *tok;
+    size_t tlen;
+    int res;
+    uint64_t out;
+};
+UTEST_F_SETUP(mc_toktou64) {
+}
+UTEST_F_TEARDOWN(mc_toktou64) {
+    uint64_t out = 0;
+    int res = mcmc_toktou64(utest_fixture->tok,
+            utest_fixture->tlen, &out);
+    ASSERT_EQ(res, utest_fixture->res);
+    ASSERT_EQ(out, utest_fixture->out);
+}
+
+#define M(d, t, tl, r, o) \
+    UTEST_F(mc_toktou64, d) { \
+        if (tl == -1) { \
+            utest_fixture->tlen = strlen(t); \
+        } else { \
+            utest_fixture->tlen = tl; \
+        } \
+        utest_fixture->tok = t; \
+        utest_fixture->res = r; \
+        utest_fixture->out = o; \
+    }
+
+M(toolong, "9876", 5000, -2, 0)
+M(neglen, "5678", -2, -2, 0)
+M(small, "1234", 3, 0, 123)
+M(junk, "asdf", -1, -3, 0)
+M(midjunk, "1234foo5678", -1, -3, 0)
+M(neg, "-5", -1, -3, 0)
+M(oneover32, "4294967296", -1, 0, UINT32_MAX+1LL)
+M(max32, "4294967295", -1, 0, 4294967295)
+M(max64,    "18446744073709551615", -1, 0, UINT64_MAX)
+M(overflow, "99999999999999999999", -1, -1, 0)
+M(five, "5", 1, 0, 5)
+M(zero, "0", 1, 0, 0)
+M(manyzero, "00000", -1, 0, 0)
+M(series, "12345678", -1, 0, 12345678)
+
+#undef M
 
 UTEST(mflag, has) {
     const char *l = "mg foo s t v f O1234 k N5000\r\n";
