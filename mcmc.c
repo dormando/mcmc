@@ -57,6 +57,7 @@ typedef struct mcmc_ctx {
 // break so long as the passed in 'len' is reasonable.
 MCMC_STATIC int _mcmc_tokenize_meta(mcmc_tokenizer_t *t, const char *line, size_t len, const int mstart, const int max) {
     const char *s = line;
+    t->metaflags = 0;
 
     // since multigets can be huge, we can't purely judge reqlen against this
     // limit, but we also can't index past it since the tokens are shorts.
