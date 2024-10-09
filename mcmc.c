@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <limits.h>
+#include <ctype.h>
 
 // TODO: move these structs into mcmc.h, but only expose them if
 // MCMC_EXPOSE_INTERNALS is defined... for tests and this thing.
@@ -83,7 +84,7 @@ MCMC_STATIC int _mcmc_tokenize_meta(mcmc_tokenizer_t *t, const char *line, size_
                     if (curtoken >= mstart) {
                         if (*s > 64 && *s < 123) {
                             t->metaflags |= (uint64_t)1 << (*s - 65);
-                        } else {
+                        } else if (isdigit(*s) == 0) {
                             return MCMC_NOK;
                         }
                     }
