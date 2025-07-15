@@ -514,14 +514,6 @@ MCMC_STATIC int mcmc_toktou64(const char *t, size_t len, uint64_t *out) {
     return MCMC_OK;
 }
 
-// TODO: these funcs aren't defending against len == 0
-// note that the command strings _must_ end in a \n so it _should_ be
-// impossible to land after the buffer.
-// However this should be adjusted next time I work on it:
-// - instead of len, calculate end.
-// - only do '-' check if pos != end
-// - check pos against end in the while loop and just incr pos
-
 MCMC_STATIC int mcmc_tokto32(const char *t, size_t len, int32_t *out) {
     int32_t sum = 0;
     const char *pos = t;
