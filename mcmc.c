@@ -525,17 +525,17 @@ MCMC_STATIC int mcmc_toktou64(const char *t, size_t len, uint64_t *out) {
 MCMC_STATIC int mcmc_tokto32(const char *t, size_t len, int32_t *out) {
     int32_t sum = 0;
     const char *pos = t;
+    const char *end = pos + len;
     int is_sig = 0;
     if (len > MCMC_TOKTO32_MAX) {
         return MCMC_TOKTO_ELONG;
     }
     // If we're negative the first character must be -
-    if (pos[0] == '-') {
-        len--;
+    if (pos != end && pos[0] == '-') {
         pos++;
         is_sig = 1;
     }
-    while (len--) {
+    while (pos != end) {
         char num = pos[0] - '0';
         if (num > -1 && num < 10) {
             if (is_sig) {
@@ -563,17 +563,17 @@ MCMC_STATIC int mcmc_tokto32(const char *t, size_t len, int32_t *out) {
 MCMC_STATIC int mcmc_tokto64(const char *t, size_t len, int64_t *out) {
     int64_t sum = 0;
     const char *pos = t;
+    const char *end = pos + len;
     int is_sig = 0;
     if (len > MCMC_TOKTO64_MAX) {
         return MCMC_TOKTO_ELONG;
     }
     // If we're negative the first character must be -
-    if (pos[0] == '-') {
-        len--;
+    if (pos != end && pos[0] == '-') {
         pos++;
         is_sig = 1;
     }
-    while (len--) {
+    while (pos != end) {
         char num = pos[0] - '0';
         if (num > -1 && num < 10) {
             if (is_sig) {

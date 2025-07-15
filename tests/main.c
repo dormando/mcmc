@@ -333,6 +333,7 @@ UTEST_F_TEARDOWN(mc_tokto64) {
         utest_fixture->out = o; \
     }
 
+M(negzerolen, "-1234", 0, 0, 0)
 M(toolong, "9876", 5000, -2, 0)
 M(neglen, "5678", -2, -2, 0)
 M(small, "1234", 3, 0, 123)
@@ -382,6 +383,7 @@ UTEST_F_TEARDOWN(mc_toktou64) {
         utest_fixture->out = o; \
     }
 
+M(zerolen, "1234", 0, 0, 0)
 M(toolong, "9876", 5000, -2, 0)
 M(neglen, "5678", -2, -2, 0)
 M(small, "1234", 3, 0, 123)
