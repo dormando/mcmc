@@ -59,6 +59,18 @@ UTEST_F(mc_tokenize, asciiset) {
     M(5, 5)
 }
 
+// Same as above but random spaces.
+UTEST_F(mc_tokenize, spacedasciiset) {
+    const char *line = "      set     foo  5 10         2       \r\n";
+    int llen = strlen(line);
+    struct mc_tc c[5] = {
+        {3, "set"}, {3, "foo"}, {1, "5"}, {2, "10"}, {1, "2"},
+    };
+
+    int res = _mcmc_tokenize_meta(&utest_fixture->t, line, llen, 250, MCMC_PARSER_MAX_TOKENS-1);
+    M(5, 5)
+}
+
 UTEST_F(mc_tokenize, asciiget) {
     const char *line = "get foobar\r\n";
     int llen = strlen(line);
@@ -440,6 +452,18 @@ UTEST(mcmc_token, flag_int_u32) {
     ASSERT_EQ(num, 9999);
     ASSERT_EQ(mcmc_token_get_flag_u32(l, &t, 'N', &num), MCMC_OK);
     ASSERT_EQ(num, 300);
+}
+
+// Do malloc dance so an ASAN pass can trigger out of bounds more easily.
+UTEST(mcmc_token, allspaces) {
+    const char *line = "           \r\n";
+    char *l = malloc(strlen(line)+1);
+    strcpy(l, line);
+    size_t len = strlen(l);
+    mcmc_tokenizer_t t = {0};
+    int res = _mcmc_tokenize_meta(&t, l, len, 255, 24);
+    ASSERT_EQ(res, 0);
+    ASSERT_EQ(t.ntokens, 0);
 }
 
 UTEST_MAIN()
