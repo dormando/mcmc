@@ -45,7 +45,7 @@ typedef struct mcmc_ctx {
 
 // INTERNAL FUNCTIONS
 
-#define TOKENIZER_MAXLEN USHRT_MAX-1
+#define TOKENIZER_MAXLEN (USHRT_MAX-1)
 
 // Find the starting offsets of each token; ignoring length.
 // This creates a fast small (<= cacheline) index into the request,
@@ -635,6 +635,8 @@ const char *mcmc_token_get(const char *l, mcmc_tokenizer_t *t, int idx, int *len
     }
 }
 
+// In these cases where we are converting tokens to numerics we want to
+// exclude the command and the key; index 1 is the first valid.
 #define X(n, p, c) \
     int n(const char *l, mcmc_tokenizer_t *t, int idx, p *val) { \
         if (idx > 0 && idx < t->ntokens) { \
