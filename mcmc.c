@@ -809,7 +809,7 @@ int mcmc_check_nonblock_connect(void *c, int *err) {
 // connect_bind_tcp()
 // ^ fill an internal struct from the stack and call into this central
 // connect?
-int mcmc_connect(void *c, char *host, char *port, int options) {
+int mcmc_connect_ex(void *c, char* source, char *host, char *port, int options) {
     mcmc_ctx_t *ctx = (mcmc_ctx_t *)c;
 
     int s;
@@ -854,6 +854,31 @@ int mcmc_connect(void *c, char *host, char *port, int options) {
             }
         }
 
+        if (source != NULL) {
+            struct addrinfo source_hints;
+            struct addrinfo *sai = NULL;
+
+            memset(&source_hints, 0, sizeof(source_hints));
+            source_hints.ai_family = next->ai_family;
+            source_hints.ai_socktype = SOCK_STREAM;
+            source_hints.ai_flags = AI_NUMERICHOST;
+
+            if( getaddrinfo(source, NULL, &source_hints, &sai) != 0){
+                res = MCMC_ERR;
+                close(sock);
+                goto end;
+            }
+
+            if( bind(sock, sai->ai_addr, sai->ai_addrlen) < 0 ){
+                freeaddrinfo(sai);
+                res = MCMC_ERR;
+                close(sock);
+                goto end;
+            }
+            freeaddrinfo(sai);
+        }
+
+
         if (options & MCMC_OPTION_NONBLOCK) {
             int flags = fcntl(sock, F_GETFL);
             if (flags < 0) {
@@ -876,7 +901,6 @@ int mcmc_connect(void *c, char *host, char *port, int options) {
 
             break;
         } else {
-            // TODO: BIND local port.
             if (connect(sock, next->ai_addr, next->ai_addrlen) != -1)
                 break;
         }
