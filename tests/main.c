@@ -177,6 +177,7 @@ N(notstored, "NOT_STORED\r\n", MCMC_RESP_GENERIC, MCMC_CODE_NOT_STORED, MCMC_OK)
 
 // check some error conditions
 N(shortres, "S\r\n", MCMC_RESP_FAIL, MCMC_ERR_SHORT, MCMC_ERR)
+N(longval, "VALUE key 0 4294967293\r\nhi\r\n", MCMC_RESP_FAIL, MCMC_ERR_VALUE, MCMC_ERR)
 
 // check error messages
 N(errorcode, "ERROR\r\n", MCMC_RESP_ERRMSG, MCMC_CODE_ERROR, MCMC_ERR)
