@@ -123,7 +123,8 @@ int mcmc_fd(void *c);
 size_t mcmc_size(int options);
 size_t mcmc_min_buffer_size(int options);
 int mcmc_parse_buf(const char *buf, size_t read, mcmc_resp_t *r);
-int mcmc_connect(void *c, char *host, char *port, int options);
+int mcmc_connect_ex(void *c, char *source, char *host, char *port, int options);
+#define mcmc_connect(c, host, port, options) mcmc_connect_ex(c, NULL, host, port, options)
 int mcmc_check_nonblock_connect(void *c, int *err);
 int mcmc_send_request(void *c, const char *request, int len, int count);
 int mcmc_request_writev(void *c, const struct iovec *iov, int iovcnt, ssize_t *sent, int count);
